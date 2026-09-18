@@ -10,6 +10,7 @@ import {
 	needsTranscription,
 	RequestAbortedError,
 	resolveNonCollidingPathWithExtension,
+	resolvePhysicalPath,
 	runSummarizeTextPipeline,
 	runTranscribeAndSummarizePipeline,
 } from "./pipeline";
@@ -438,8 +439,17 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		});
 
 		let blob: Blob;
+		const isVideo = isVideoFile(file);
+		const physicalPath = resolvePhysicalPath(this.app, file);
 		try {
-			blob = new Blob([await this.app.vault.readBinary(file)], { type: mimeTypeForExtension(file.extension) });
+			// Video files on disk don't need to be buffered entirely into memory up front -
+			// FFmpeg streams them directly from the path. If FFmpeg isn't present, the fallback
+			// reads the file on demand.
+			if (isVideo && physicalPath) {
+				blob = new Blob([], { type: mimeTypeForExtension(file.extension) });
+			} else {
+				blob = new Blob([await this.app.vault.readBinary(file)], { type: mimeTypeForExtension(file.extension) });
+			}
 		} catch (error) {
 			this.taskTracker.finish(transitionTaskId);
 			this.reportPipelineError("transcribe & summarize", error);
@@ -451,7 +461,8 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				mimeType: blob.type,
 				baseName: file.basename,
 				audioFile: file,
-				extractAudio: isVideoFile(file),
+				extractAudio: isVideo,
+				filePath: physicalPath,
 			},
 			transitionTaskId
 		);

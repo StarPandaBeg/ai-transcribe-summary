@@ -12,6 +12,7 @@ export function createTranscriptionProvider(settings: AiTranscribeSummarySetting
 		baseUrl: config.baseUrl,
 		apiModel: config.model,
 		maxFileSizeMb: settings.whisperMaxFileSizeMb,
+		ffmpegPath: settings.ffmpegPath,
 	});
 }
 

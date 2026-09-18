@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WhisperTranscriptionProvider } from "../../src/providers/whisper-transcription-provider";
 
-const { chunkAtSilenceMock, needsChunkingMock, requestUrlMock } = vi.hoisted(() => ({
+const { chunkAtSilenceMock, needsChunkingMock, requestUrlMock, extractAudioFromVideoMock } = vi.hoisted(() => ({
 	chunkAtSilenceMock: vi.fn(),
 	needsChunkingMock: vi.fn(() => true),
 	requestUrlMock: vi.fn(),
+	extractAudioFromVideoMock: vi.fn(async ({ blob, onProgress }) => {
+		onProgress?.({ status: "Extracting audio from video" });
+		return blob;
+	}),
 }));
 
 vi.mock("obsidian", () => ({
@@ -13,6 +17,10 @@ vi.mock("obsidian", () => ({
 	Notice: class {
 		constructor(_message: string, _duration?: number) {}
 	},
+}));
+
+vi.mock("../../src/audio/video-extractor", () => ({
+	extractAudioFromVideo: extractAudioFromVideoMock,
 }));
 
 vi.mock("../../src/audio/chunker", () => ({
@@ -49,6 +57,7 @@ beforeEach(() => {
 	chunkAtSilenceMock.mockClear();
 	needsChunkingMock.mockReset();
 	needsChunkingMock.mockReturnValue(true);
+	extractAudioFromVideoMock.mockClear();
 });
 
 describe("WhisperTranscriptionProvider concurrent chunk uploads", () => {

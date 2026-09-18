@@ -26,6 +26,8 @@ export interface AudioSource {
 	baseName: string;
 	/** The saved/source media file in the vault, when one exists - used for result placement and summary links. Undefined when saveAudioFile is off for a live recording. */
 	audioFile?: TFile;
+	/** Filesystem path to the source file on disk when available. */
+	filePath?: string;
 }
 
 /** True when a recording needs an actual transcription API call - either a transcript file is wanted or its text feeds summary generation. */
@@ -135,12 +137,14 @@ export async function runTranscribeAndSummarizePipeline(
 	onProgress({ status: t("Transcribing") });
 	new Notice(t('Transcribing "{name}"...', { name: source.baseName }));
 	const transcribeStartedAt = Date.now();
+	const filePath = source.filePath ?? (source.audioFile ? resolvePhysicalPath(app, source.audioFile) : undefined);
 	const transcription = await transcriptionProvider.transcribe({
 		audio: source.blob,
 		mimeType: source.mimeType,
 		vocabularyHints: settings.vocabularyHints,
 		language: settings.transcriptionLanguage,
 		extractAudio: source.extractAudio,
+		filePath,
 		onProgress,
 		signal,
 	});
@@ -515,4 +519,21 @@ export function isVideoFile(file: Pick<TFile, "extension">): boolean {
 
 export function isSupportedMediaFile(file: TFile): boolean {
 	return isAudioFile(file) || isVideoFile(file);
+}
+
+/** Resolves the absolute filesystem path for a vault file on desktop, if supported by the vault adapter. */
+export function resolvePhysicalPath(app: App, file: TFile): string | undefined {
+	try {
+		const adapter = app.vault.adapter;
+		if (adapter && "getFullPath" in adapter && typeof (adapter as { getFullPath?: unknown }).getFullPath === "function") {
+			return (adapter as { getFullPath: (path: string) => string }).getFullPath(file.path);
+		}
+		if (adapter && "getBasePath" in adapter && typeof (adapter as { getBasePath?: unknown }).getBasePath === "function") {
+			const basePath = (adapter as { getBasePath: () => string }).getBasePath();
+			return `${basePath}/${file.path}`;
+		}
+	} catch {
+		// Mock environment or non-filesystem adapter
+	}
+	return undefined;
 }

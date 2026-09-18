@@ -138,7 +138,7 @@ function rms(channelData: Float32Array, start: number, end: number): number {
 }
 
 /** Encodes samples [startSample, endSample) of `buffer` as a 16-bit PCM WAV file. */
-function encodeWav(buffer: AudioBuffer, startSample: number, endSample: number): ArrayBuffer {
+export function encodeWav(buffer: AudioBuffer, startSample = 0, endSample = buffer.length): ArrayBuffer {
 	const numChannels = buffer.numberOfChannels;
 	const sampleRate = buffer.sampleRate;
 	const numFrames = endSample - startSample;

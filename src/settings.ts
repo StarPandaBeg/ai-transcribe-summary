@@ -203,6 +203,8 @@ export interface AiTranscribeSummarySettings {
 	transcriptionLanguage: string;
 	/** Maximum file size in MB sent to Whisper before splitting into chunks. */
 	whisperMaxFileSizeMb: number;
+	/** Custom path to the ffmpeg executable. When empty, standard locations and PATH are probed. */
+	ffmpegPath: string;
 
 	// Recording behavior
 	microphoneDeviceId: string;
@@ -266,6 +268,7 @@ export const DEFAULT_SETTINGS: AiTranscribeSummarySettings = {
 	vocabularyHints: "",
 	transcriptionLanguage: "",
 	whisperMaxFileSizeMb: 22,
+	ffmpegPath: "",
 
 	microphoneDeviceId: "",
 	audioBitrateKbps: 32,
@@ -461,6 +464,8 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return settings.transcriptionLanguage;
 			case "whisperMaxFileSizeMb":
 				return settings.whisperMaxFileSizeMb;
+			case "ffmpegPath":
+				return settings.ffmpegPath;
 			case "audioBitrateKbps":
 				return String(settings.audioBitrateKbps);
 			case "silenceAutoStopMinutes":
@@ -593,6 +598,9 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				}
 				break;
 			}
+			case "ffmpegPath":
+				settings.ffmpegPath = (value as string).trim();
+				break;
 			case "audioBitrateKbps":
 				settings.audioBitrateKbps = Number(value) as AudioBitrateKbps;
 				break;
@@ -726,6 +734,16 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 						max: 100,
 						step: 1,
 						validate: (value) => (Number.isFinite(value) && value >= 1 && value <= 100 ? undefined : t("Must be between 1 and 100 MB.")),
+					},
+				},
+				{
+					name: t("FFmpeg path"),
+					desc: t("Custom path to the ffmpeg executable for extracting audio from video files (MKV, MOV, MP4, AVI, etc.). If left blank, standard system locations and PATH are searched automatically."),
+					visible: () => this.needsTranscription(),
+					control: {
+						type: "text",
+						key: "ffmpegPath",
+						placeholder: t("Auto-detect"),
 					},
 				},
 				{

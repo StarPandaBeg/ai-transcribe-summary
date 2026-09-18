@@ -135,6 +135,7 @@ const RU: Record<string, string> = {
 	"Transcription provider": "Провайдер транскрипции",
 	"Speaking language": "Язык речи",
 	"Max Whisper file size (MB)": "Макс. размер файла для Whisper (МБ)",
+	"FFmpeg path": "Путь к FFmpeg",
 	"Keep transcript": "Сохранять транскрипцию",
 	"Transcript folder": "Папка транскрипций",
 	"Clean up transcript": "Очищать транскрипцию",
@@ -235,6 +236,12 @@ const RU: Record<string, string> = {
 		"Язык речи в записях. Транскрипция создаётся на этом языке без перевода; настройка лишь повышает точность и скорость, особенно для коротких записей и речи с акцентом. Выберите автоопределение для записей с несколькими языками или языком вне списка.",
 	"Maximum audio chunk size sent to Whisper. Recordings larger than this are split at points of silence. Lower this if your provider returns HTTP 413.":
 		"Максимальный размер аудиофрагмента, отправляемого в Whisper. Записи больше этого размера разделяются в паузах тишины. Уменьшите значение, если провайдер возвращает ошибку HTTP 413.",
+	"Custom path to the ffmpeg executable for extracting audio from video files (MKV, MOV, MP4, AVI, etc.). If left blank, standard system locations and PATH are searched automatically.":
+		"Путь к исполняемому файлу ffmpeg для извлечения звука из видеофайлов (MKV, MOV, MP4, AVI и др.). Если не указан, поиск выполняется автоматически в стандартных папках и переменной PATH.",
+	'Could not extract audio from video "{name}". This media format ({extension}) requires FFmpeg. Please install FFmpeg (e.g. \'brew install ffmpeg\' on macOS) or configure its path in Settings under Transcription.':
+		"Не удалось извлечь звук из видео «{name}». Для этого медиаформата ({extension}) требуется FFmpeg. Установите FFmpeg (например, с помощью «brew install ffmpeg» на macOS) или укажите путь к нему в настройках в разделе «Транскрипция».",
+	'Could not extract audio track from video "{name}". The file may not contain audio, or its codec is not supported.':
+		"Не удалось извлечь аудиодорожку из видео «{name}». Возможно, в файле нет звука или его кодек не поддерживается.",
 	"Save the transcript in the format selected under Output files. Transcription still runs when summary generation is enabled, even if this is off. Turn on 'Save audio file' too, or a recording with this and summary generation both off keeps nothing.":
 		"Сохранять транскрипцию в формате, выбранном в разделе «Выходные файлы». Если включено создание конспекта, транскрипция выполняется даже при отключённой настройке. Также включите сохранение аудиофайла, иначе при отключённом конспекте запись не сохранится.",
 	"Vault folder where transcript files are saved. When 'Save results next to source audio' is enabled, this is the fallback for recordings without a saved audio file.":

@@ -1,5 +1,6 @@
 import { RequestUrlParam, RequestUrlResponse } from "obsidian";
 import { chunkAtSilence, needsChunking } from "../audio/chunker";
+import { extractAudioFromVideo } from "../audio/video-extractor";
 import { t } from "../i18n";
 import { logDebug } from "../log";
 import type { ProgressCallback } from "../progress";
@@ -14,6 +15,7 @@ export interface WhisperProviderConfig {
 	/** API model name as sent to the API (e.g. "whisper-1", "whisper-large-v3"). */
 	apiModel: string;
 	maxFileSizeMb?: number;
+	ffmpegPath?: string;
 }
 
 /** Whisper transcription response shape, narrowed to the fields this provider reads. */
@@ -71,20 +73,32 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 
 		const decodeBeforeUpload = request.extractAudio === true;
 		const maxChunkBytes = (this.config.maxFileSizeMb ?? 22) * 1024 * 1024;
-		const chunked = decodeBeforeUpload || needsChunking(request.audio, maxChunkBytes);
-		logDebug("transcribe: audio size", request.audio.size, "bytes, chunking:", chunked, "extracting audio:", decodeBeforeUpload, "model:", this.config.apiModel);
+
+		let audioBlob = request.audio;
+		if (decodeBeforeUpload) {
+			audioBlob = await extractAudioFromVideo({
+				blob: request.audio,
+				filePath: request.filePath,
+				mimeType: request.mimeType,
+				ffmpegPath: this.config.ffmpegPath,
+				signal,
+				onProgress,
+			});
+		}
+
+		const chunked = decodeBeforeUpload || needsChunking(audioBlob, maxChunkBytes);
+		logDebug("transcribe: audio size", audioBlob.size, "bytes, chunking:", chunked, "extracting audio:", decodeBeforeUpload, "model:", this.config.apiModel);
 
 		const options = { vocabularyHints: request.vocabularyHints, language: request.language };
 
 		let pieces: TranscribedPiece[];
 		if (chunked) {
-			if (decodeBeforeUpload) onProgress({ status: t("Extracting audio from video") });
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.
-			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(request.audio, maxChunkBytes), options, onProgress, signal);
+			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(audioBlob, maxChunkBytes), options, onProgress, signal);
 		} else {
-			const piece = { data: await request.audio.arrayBuffer(), mimeType: request.audio.type || request.mimeType, startSeconds: 0, chunkIndex: 0, chunkCount: 1 };
+			const piece = { data: await audioBlob.arrayBuffer(), mimeType: audioBlob.type || request.mimeType, startSeconds: 0, chunkIndex: 0, chunkCount: 1 };
 			pieces = [await this.transcribeOnePiece(piece, options, 0, signal)];
 		}
 
