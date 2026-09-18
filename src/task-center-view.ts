@@ -1,4 +1,5 @@
 import { ItemView, setIcon, WorkspaceLeaf } from "obsidian";
+import { t } from "./i18n";
 import { TaskTracker, TrackedTask } from "./task-tracker";
 
 export const TASK_CENTER_VIEW_TYPE = "ai-transcribe-summary-task-center";
@@ -32,7 +33,7 @@ export class TaskCenterView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "AI tasks";
+		return t("AI tasks");
 	}
 
 	getIcon(): string {
@@ -75,19 +76,19 @@ export class TaskCenterView extends ItemView {
 		container.addClass("ai-transcribe-summary-task-center");
 
 		const header = container.createDiv({ cls: "ai-transcribe-summary-task-header" });
-		header.createEl("h4", { text: "Current tasks" });
+		header.createEl("h4", { text: t("Current tasks") });
 		header.createSpan({
 			cls: "ai-transcribe-summary-task-count",
 			text: this.tasks.length.toString(),
-			attr: { "aria-label": `${this.tasks.length} active task${this.tasks.length === 1 ? "" : "s"}` },
+			attr: { "aria-label": t("Active tasks: {count}", { count: this.tasks.length }) },
 		});
 
 		if (this.tasks.length === 0) {
 			const empty = container.createDiv({ cls: "ai-transcribe-summary-task-empty" });
 			const icon = empty.createDiv({ cls: "ai-transcribe-summary-task-empty-icon" });
 			setIcon(icon, "circle-check-big");
-			empty.createEl("p", { text: "No tasks are running" });
-			empty.createEl("small", { text: "Recording, transcription, and summary progress will appear here." });
+			empty.createEl("p", { text: t("No tasks are running") });
+			empty.createEl("small", { text: t("Recording, transcription, and summary progress will appear here.") });
 			return;
 		}
 
@@ -108,7 +109,7 @@ export class TaskCenterView extends ItemView {
 		if (task.progress) {
 			const percentage = Math.round((task.progress.completed / task.progress.total) * 100);
 			const progressHeader = details.createDiv({ cls: "ai-transcribe-summary-progress-header" });
-			const unit = task.progress.unit ?? "steps";
+			const unit = t(task.progress.unit ?? "steps");
 			progressHeader.createSpan({ text: `${task.progress.completed} / ${task.progress.total} ${unit}` });
 			progressHeader.createSpan({ text: `${percentage}%` });
 			const progressBar = details.createDiv({
@@ -123,12 +124,12 @@ export class TaskCenterView extends ItemView {
 			});
 			progressBar.createDiv({ cls: "ai-transcribe-summary-progress-fill" }).style.setProperty("width", `${percentage}%`);
 		}
-		details.createDiv({ cls: "ai-transcribe-summary-task-elapsed", text: `Elapsed ${formatDuration(Date.now() - task.startedAt)}` });
+		details.createDiv({ cls: "ai-transcribe-summary-task-elapsed", text: t("Elapsed {duration}", { duration: formatDuration(Date.now() - task.startedAt) }) });
 
 		if (task.canCancel) {
 			const button = card.createEl("button", {
 				cls: "clickable-icon ai-transcribe-summary-task-cancel",
-				attr: { "aria-label": task.kind === "recording" ? "Stop recording" : "Stop task" },
+				attr: { "aria-label": t(task.kind === "recording" ? "Stop recording" : "Stop task") },
 			});
 			setIcon(button, "square");
 			button.addEventListener("click", () => {

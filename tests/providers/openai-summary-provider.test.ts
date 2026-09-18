@@ -4,6 +4,7 @@ import { OpenAiSummaryProvider } from "../../src/providers/openai-summary-provid
 const { requestUrlMock } = vi.hoisted(() => ({ requestUrlMock: vi.fn() }));
 
 vi.mock("obsidian", () => ({
+	getLanguage: () => "en",
 	requestUrl: requestUrlMock,
 }));
 

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // (PluginSettingTab, createFragment, ...) not worth stubbing just to satisfy a module-level
 // import - the functions under test here need none of it.
 vi.mock("obsidian", () => ({
+	getLanguage: () => "en",
 	normalizePath: (path: string) => path,
 }));
 vi.mock("../src/settings", () => ({}));

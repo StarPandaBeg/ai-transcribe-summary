@@ -1,4 +1,5 @@
 import { logDebug } from "../log";
+import { t } from "../i18n";
 import type { ProgressCallback } from "../progress";
 import { RequestAbortedError } from "./request-timeout";
 import { splitTranscriptForSummary } from "./transcript-splitter";
@@ -39,17 +40,17 @@ export async function summarizeLongTranscript(
 	const digests: string[] = [];
 	for (let i = 0; i < chunks.length; i++) {
 		if (request.signal?.aborted) throw new RequestAbortedError();
-		onProgress({ status: `Summarizing part ${i + 1} of ${chunks.length}`, completed: i, total: totalSteps, unit: "steps" });
+		onProgress({ status: t("Summarizing part {part} of {total}", { part: i + 1, total: chunks.length }), completed: i, total: totalSteps, unit: "steps" });
 		const digestResult = await provider.summarize({ transcript: chunks[i], prompt: MAP_CHUNK_PROMPT, signal: request.signal, step: request.step });
 		digests.push(digestResult.summary.trim());
 	}
 
 	if (request.signal?.aborted) throw new RequestAbortedError();
-	onProgress({ status: "Combining summary", completed: chunks.length, total: totalSteps, unit: "steps" });
+	onProgress({ status: t("Combining summary"), completed: chunks.length, total: totalSteps, unit: "steps" });
 	const combinedDigest = digests.map((digest, i) => `## Part ${i + 1}\n\n${digest}`).join("\n\n");
 	logDebug(`${step}: combining digests for map-reduce`, { digestCount: digests.length, combinedLength: combinedDigest.length });
 
 	const result = await provider.summarize({ transcript: combinedDigest, prompt: request.prompt, signal: request.signal, step: request.step });
-	onProgress({ status: "Summary complete", completed: totalSteps, total: totalSteps, unit: "steps" });
+	onProgress({ status: t("Summary complete"), completed: totalSteps, total: totalSteps, unit: "steps" });
 	return result;
 }

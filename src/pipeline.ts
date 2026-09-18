@@ -1,4 +1,5 @@
 import { App, Editor, MarkdownView, normalizePath, Notice, TFile, TFolder } from "obsidian";
+import { t } from "./i18n";
 import { logDebug } from "./log";
 import type { ProgressCallback } from "./progress";
 import { createSummaryProvider, createTranscriptionProvider, resolveSummaryApiKey } from "./providers/factory";
@@ -39,7 +40,7 @@ export function validatePipelineConfig(settings: AiTranscribeSummarySettings): s
 	const transcriptionConfig = settings.providers[settings.transcriptionProvider];
 	if (!transcriptionConfig.apiKey) {
 		const label = settings.transcriptionProvider === "openai" ? "OpenAI" : "OpenRouter";
-		return `${label} API key is not set. Add it in Settings under "${label}", or switch the transcription provider.`;
+		return t('{label} API key is not set. Add it in Settings under "{label}", or switch the transcription provider.', { label });
 	}
 
 	if (settings.generateSummary) {
@@ -56,9 +57,9 @@ export function validateSummaryProviderConfig(settings: AiTranscribeSummarySetti
 	if (!effectiveApiKey) {
 		const isReusingTranscriptionKey = settings.reuseWhisperKeyForSummary && transcriptionKeyReuseTarget(settings) === settings.summaryProvider;
 		const hint = isReusingTranscriptionKey
-			? '"Reuse transcription API key" is on but the transcription API key is also empty - set one of the two'
-			: `Add it in Settings under "Summary generation"`;
-		return `The ${settings.summaryProvider} API key is not set. ${hint}.`;
+			? t("Reuse is enabled, but the transcription API key is also empty - set one of the two keys")
+			: t("Add it in Settings under Summary");
+		return t("The {provider} API key is not set. {hint}.", { provider: settings.summaryProvider, hint });
 	}
 	return undefined;
 }
@@ -112,7 +113,11 @@ export async function runTranscribeAndSummarizePipeline(
 
 	if (!needsTranscription(settings)) {
 		logDebug("pipeline finished (transcript/summary/cleanup all off, audio only)");
-		new Notice(source.audioFile ? `Recording saved as "${source.baseName}" - transcription is off.` : `Recording finished - transcription is off, and "Save audio file" is also off, so nothing was kept.`);
+		new Notice(
+			source.audioFile
+				? t('Recording saved as "{name}" - transcription is off.', { name: source.baseName })
+				: t('Recording finished - transcription is off, and "Save audio file" is also off, so nothing was kept.')
+		);
 		return;
 	}
 
@@ -127,8 +132,8 @@ export async function runTranscribeAndSummarizePipeline(
 	const transcriptionProvider = createTranscriptionProvider(settings);
 	logDebug("transcription provider resolved", transcriptionProvider.id);
 
-	onProgress({ status: "Transcribing" });
-	new Notice(`Transcribing "${source.baseName}"...`);
+	onProgress({ status: t("Transcribing") });
+	new Notice(t('Transcribing "{name}"...', { name: source.baseName }));
 	const transcribeStartedAt = Date.now();
 	const transcription = await transcriptionProvider.transcribe({
 		audio: source.blob,
@@ -142,7 +147,7 @@ export async function runTranscribeAndSummarizePipeline(
 	logDebug("transcription finished", { durationMs: Date.now() - transcribeStartedAt, textLength: transcription.text.length, repetitionWarning: transcription.repetitionWarning });
 
 	if (transcription.repetitionWarning) {
-		new Notice(`Warning: possible repetition-loop artifact detected in the transcript for "${source.baseName}".`);
+		new Notice(t('Warning: possible repetition-loop artifact detected in the transcript for "{name}".', { name: source.baseName }));
 	}
 
 	// From here on (cleanup, summary, writing the note) a failure would otherwise discard a
@@ -155,16 +160,16 @@ export async function runTranscribeAndSummarizePipeline(
 	let transcriptWritten = false;
 	try {
 		if (settings.transcribeAudio) {
-			onProgress({ status: "Saving transcript" });
+			onProgress({ status: t("Saving transcript") });
 			await writeTranscriptFile(app, settings, source.baseName, transcription.text, transcription.segments, source.audioFile);
 			transcriptWritten = true;
 		}
 
 		if (!settings.generateSummary) {
 			if (settings.transcribeAudio) {
-				new Notice(`Transcript ready for "${source.baseName}".`);
+				new Notice(t('Transcript ready for "{name}".', { name: source.baseName }));
 			} else {
-				new Notice(`Recording processed for "${source.baseName}" - transcript and summary are both off, nothing was kept.`);
+				new Notice(t('Recording processed for "{name}" - transcript and summary are both off, nothing was kept.', { name: source.baseName }));
 			}
 			logDebug("pipeline finished (transcript only, or nothing kept)");
 			return;
@@ -175,8 +180,8 @@ export async function runTranscribeAndSummarizePipeline(
 			const cleanupProvider = createSummaryProvider(settings);
 			logDebug("cleanup provider resolved", cleanupProvider.id);
 
-			onProgress({ status: "Cleaning up transcript" });
-			new Notice(`Cleaning up transcript for "${source.baseName}"...`);
+			onProgress({ status: t("Cleaning up transcript") });
+			new Notice(t('Cleaning up transcript for "{name}"...', { name: source.baseName }));
 			const cleanupStartedAt = Date.now();
 			const cleanupResult = await cleanupProvider.summarize({
 				transcript: transcriptText,
@@ -191,15 +196,15 @@ export async function runTranscribeAndSummarizePipeline(
 		const summaryProvider = createSummaryProvider(settings);
 		logDebug("summary provider resolved", summaryProvider.id);
 
-		onProgress({ status: "Generating summary" });
-		new Notice(`Generating summary for "${source.baseName}"...`);
+		onProgress({ status: t("Generating summary") });
+		new Notice(t('Generating summary for "{name}"...', { name: source.baseName }));
 		const summarizeStartedAt = Date.now();
 		const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: transcriptText, prompt: settings.summaryPrompt, signal }, onProgress);
 		logDebug("summary finished", { durationMs: Date.now() - summarizeStartedAt, summaryLength: summaryResult.summary.length });
 
 		const summaryMarkdown = buildSummaryMarkdown(summaryResult.summary, transcription.repetitionWarning);
 
-		onProgress({ status: "Saving results" });
+		onProgress({ status: t("Saving results") });
 		// Re-checked here rather than trusting the activeView captured above: transcription/cleanup/summary
 		// are slow async calls, and the user may have switched away from that note (or it may just be a stale
 		// background tab) by the time we're ready to write. Inserting into a note that's no longer on screen
@@ -216,13 +221,13 @@ export async function runTranscribeAndSummarizePipeline(
 			writeIntoActiveNote(stillActiveView, `${mediaLinkMarkdown}${summaryMarkdown}`);
 		} else {
 			if (settings.summaryPlacement === "active-note" && activeView) {
-				const outputFolder = resolveResultFolder(settings.summaryFolder, source.audioFile, settings.saveResultsNextToSource) || "the vault root";
-				new Notice(`Couldn't detect the note to insert into - creating a new file in "${outputFolder}" instead.`);
+				const outputFolder = resolveResultFolder(settings.summaryFolder, source.audioFile, settings.saveResultsNextToSource) || t("the vault root");
+				new Notice(t('Couldn\'t detect the note to insert into - creating a new file in "{folder}" instead.', { folder: outputFolder }));
 			}
 			await writeIntoNewNote(app, settings, source.baseName, summaryMarkdown, source.audioFile);
 		}
 
-		new Notice(`Summary ready for "${source.baseName}".`);
+		new Notice(t('Summary ready for "{name}".', { name: source.baseName }));
 		logDebug("pipeline finished (summary)");
 	} catch (error) {
 		const cancelled = error instanceof RequestAbortedError;
@@ -232,15 +237,13 @@ export async function runTranscribeAndSummarizePipeline(
 		const rescuePath = transcriptWritten ? undefined : await tryWriteRescueTranscript(app, settings, source, transcription.text, transcription.segments);
 
 		if (cancelled) {
-			throw new RequestAbortedError(
-				rescuePath ? `Stopped. The transcript so far was saved to "${rescuePath}".` : "Stopped."
-			);
+			throw new RequestAbortedError(rescuePath ? t('Stopped. The transcript so far was saved to "{path}".', { path: rescuePath }) : t("Stopped."));
 		}
 
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(
 			rescuePath
-				? `${message}\n\nThe transcript was already produced and has been saved to "${rescuePath}" so it isn't lost. Fix the issue above, then re-run "Transcribe & summarize" on the audio file - or use the saved transcript directly.`
+				? `${message}\n\n${t('The transcript was already produced and has been saved to "{path}" so it isn\'t lost. Fix the issue above, then re-run "Transcribe & summarize" on the audio file - or use the saved transcript directly.', { path: rescuePath })}`
 				: message,
 			{ cause: error }
 		);
@@ -283,14 +286,14 @@ export async function runSummarizeTextPipeline(
 	}
 
 	if (!source.text.trim()) {
-		throw new Error("There's no text to summarize.");
+		throw new Error(t("There's no text to summarize."));
 	}
 
 	const summaryProvider = createSummaryProvider(settings);
 	logDebug("summary provider resolved", summaryProvider.id);
 
-	onProgress({ status: "Generating summary" });
-	new Notice(`Generating summary for "${source.fileLabel}"...`);
+	onProgress({ status: t("Generating summary") });
+	new Notice(t('Generating summary for "{name}"...', { name: source.fileLabel }));
 	const summarizeStartedAt = Date.now();
 	const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: source.text, prompt: settings.summaryPrompt, signal }, onProgress);
 	logDebug("summary finished", { durationMs: Date.now() - summarizeStartedAt, summaryLength: summaryResult.summary.length });
@@ -302,7 +305,7 @@ export async function runSummarizeTextPipeline(
 		source.editor.replaceRange(summaryMarkdown, source.editor.getCursor());
 	}
 
-	new Notice(`Summary ready for "${source.fileLabel}".`);
+	new Notice(t('Summary ready for "{name}".', { name: source.fileLabel }));
 	logDebug("text summary pipeline finished");
 }
 
@@ -331,7 +334,7 @@ async function tryWriteRescueTranscript(
 
 function buildSummaryMarkdown(summary: string, repetitionWarning: boolean): string {
 	const warning = repetitionWarning
-		? "> [!warning] Possible repetition-loop artifact detected in the transcript - review before trusting this summary.\n\n"
+		? `> [!warning] ${t("Possible repetition-loop artifact detected in the transcript - review before trusting this summary.")}\n\n`
 		: "";
 	return `${warning}${summary.trim()}\n`;
 }
@@ -353,7 +356,7 @@ export function buildTimestampedTranscriptMarkdown(segments: TranscriptionSegmen
 	const lines = segments.map(
 		(segment) => `**[${formatTranscriptTimestamp(segment.start)} – ${formatTranscriptTimestamp(segment.end)}]** ${segment.text.trim()}`
 	);
-	return `## Full Transcript\n\n${lines.join("\n\n")}\n`;
+	return `${t("## Full Transcript")}\n\n${lines.join("\n\n")}\n`;
 }
 
 export function transcriptFileExtension(format: TranscriptOutputFormat): "md" | "json" {
@@ -361,7 +364,7 @@ export function transcriptFileExtension(format: TranscriptOutputFormat): "md" | 
 }
 
 export function buildTranscriptContent(text: string, segments: TranscriptionSegment[], format: TranscriptOutputFormat): string {
-	if (format === "text") return `## Full Transcript\n\n${text.trim()}\n`;
+	if (format === "text") return `${t("## Full Transcript")}\n\n${text.trim()}\n`;
 	if (format === "markdown") return buildTimestampedTranscriptMarkdown(segments);
 	return buildTranscriptJson(segments);
 }
@@ -460,7 +463,7 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	if (!existing) {
 		await app.vault.createFolder(folderPath);
 	} else if (!(existing instanceof TFolder)) {
-		throw new Error(`"${folderPath}" exists but is not a folder.`);
+		throw new Error(t('"{path}" exists but is not a folder.', { path: folderPath }));
 	}
 }
 

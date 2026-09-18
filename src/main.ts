@@ -1,5 +1,6 @@
 import { App, Editor, MarkdownView, Menu, Modal, normalizePath, Notice, Plugin, setIcon, Setting, TAbstractFile, TFile, TFolder } from "obsidian";
 import { AudioRecorder, isRecordingSilent, LEVEL_BAND_COUNT, RecordingResult } from "./audio/recorder";
+import { t } from "./i18n";
 import {
 	AudioSource,
 	formatTimestampForFilename,
@@ -12,7 +13,17 @@ import {
 	runSummarizeTextPipeline,
 	runTranscribeAndSummarizePipeline,
 } from "./pipeline";
-import { AiTranscribeSummarySettingTab, AiTranscribeSummarySettings, DEFAULT_SETTINGS } from "./settings";
+import {
+	AiTranscribeSummarySettingTab,
+	AiTranscribeSummarySettings,
+	DEFAULT_CLEANUP_PROMPT,
+	DEFAULT_SETTINGS,
+	DEFAULT_SUMMARY_PROMPT,
+	ENGLISH_DEFAULT_CLEANUP_PROMPT,
+	ENGLISH_DEFAULT_SUMMARY_PROMPT,
+	RUSSIAN_DEFAULT_CLEANUP_PROMPT,
+	RUSSIAN_DEFAULT_SUMMARY_PROMPT,
+} from "./settings";
 import { TaskCenterView, TASK_CENTER_VIEW_TYPE } from "./task-center-view";
 import { TaskTracker } from "./task-tracker";
 import type { ProgressUpdate } from "./progress";
@@ -94,14 +105,14 @@ class StopRecordingConfirmModal extends Modal {
 	}
 
 	onOpen() {
-		this.setTitle("Stop recording?");
-		this.contentEl.createEl("p", { text: "This will end the current recording. This can't be undone." });
+		this.setTitle(t("Stop recording?"));
+		this.contentEl.createEl("p", { text: t("This will end the current recording. This can't be undone.") });
 
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(t("Cancel")).onClick(() => this.close()))
 			.addButton((button) =>
 				button
-					.setButtonText("Stop recording")
+					.setButtonText(t("Stop recording"))
 					.setDestructive()
 					.setCta()
 					.onClick(() => {
@@ -133,14 +144,14 @@ class StartRecordingConfirmModal extends Modal {
 	}
 
 	onOpen() {
-		this.setTitle("Start recording?");
-		this.contentEl.createEl("p", { text: "This will start recording audio from your microphone." });
+		this.setTitle(t("Start recording?"));
+		this.contentEl.createEl("p", { text: t("This will start recording audio from your microphone.") });
 
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(t("Cancel")).onClick(() => this.close()))
 			.addButton((button) =>
 				button
-					.setButtonText("Start recording")
+					.setButtonText(t("Start recording"))
 					.setCta()
 					.onClick(() => {
 						this.confirmed = true;
@@ -166,22 +177,22 @@ class SilentRecordingConfirmModal extends Modal {
 
 	onOpen() {
 		if (this.undecodable) {
-			this.setTitle("Recording could not be checked");
+			this.setTitle(t("Recording could not be checked"));
 			this.contentEl.createEl("p", {
-				text: "This audio could not be read - it may be empty or corrupted. Sending it for transcription is likely to fail.",
+				text: t("This audio could not be read - it may be empty or corrupted. Sending it for transcription is likely to fail."),
 			});
 		} else {
-			this.setTitle("Recording appears to be silent");
+			this.setTitle(t("Recording appears to be silent"));
 			this.contentEl.createEl("p", {
-				text: "No audio signal was detected in this recording. You can still transcribe and summarize it, but the result may be empty.",
+				text: t("No audio signal was detected in this recording. You can still transcribe and summarize it, but the result may be empty."),
 			});
 		}
 
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText("Discard").onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(t("Discard")).onClick(() => this.close()))
 			.addButton((button) =>
 				button
-					.setButtonText("Transcribe anyway")
+					.setButtonText(t("Transcribe anyway"))
 					.setCta()
 					.onClick(() => {
 						this.confirmed = true;
@@ -253,18 +264,18 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.statusBarTextEl = this.statusBarItem.createSpan();
 		this.statusBarItem.addEventListener("click", () => void this.openTaskCenter());
 		this.statusBarItem.addClass("ai-transcribe-summary-status");
-		this.statusBarItem.setAttribute("aria-label", "Open AI tasks");
+		this.statusBarItem.setAttribute("aria-label", t("Open AI tasks"));
 		this.statusBarItem.hide();
 
-		this.addRibbonIcon("list-checks", "Open AI tasks", () => void this.openTaskCenter());
+		this.addRibbonIcon("list-checks", t("Open AI tasks"), () => void this.openTaskCenter());
 
 		this.addCommand({
 			id: "open-task-center",
-			name: "Open task center",
+			name: t("Open task center"),
 			callback: () => void this.openTaskCenter(),
 		});
 
-		this.ribbonIconEl = this.addRibbonIcon("mic", "Start meeting recording", () => {
+		this.ribbonIconEl = this.addRibbonIcon("mic", t("Start meeting recording"), () => {
 			if (this.transitioning) return;
 			if (this.state === "idle") {
 				this.requestStartRecording(true);
@@ -276,7 +287,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 		this.addCommand({
 			id: "toggle-recording",
-			name: "Start/Stop recording",
+			name: t("Start/Stop recording"),
 			checkCallback: (checking) => {
 				if (this.transitioning) return false;
 				if (!checking) {
@@ -292,7 +303,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 		this.addCommand({
 			id: "toggle-pause-recording",
-			name: "Pause/resume recording",
+			name: t("Pause/resume recording"),
 			checkCallback: (checking) => {
 				if (this.state === "idle" || this.transitioning) return false;
 				if (!checking) this.togglePause();
@@ -302,7 +313,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 		this.addCommand({
 			id: "transcribe-and-summarize-active-file",
-			name: "Transcribe & summarize active file",
+			name: t("Transcribe & summarize active file"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!file || !isSupportedMediaFile(file)) return false;
@@ -313,7 +324,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 		this.addCommand({
 			id: "stop-transcription-summary",
-			name: "Stop transcription/summary",
+			name: t("Stop transcription/summary"),
 			checkCallback: (checking) => {
 				if (this.pipelineJobControllers.size === 0) return false;
 				if (!checking) this.stopPipelineJobs();
@@ -323,7 +334,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 		this.addCommand({
 			id: "summarize-active-note",
-			name: "Summarize note",
+			name: t("Summarize note"),
 			editorCallback: (editor, view) => void this.summarizeText(editor, editor.getValue(), false, view.file?.basename ?? "note"),
 		});
 
@@ -351,7 +362,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		if (isSupportedMediaFile(file)) {
 			menu.addItem((item) =>
 				item
-					.setTitle("Transcribe & summarize")
+					.setTitle(t("Transcribe & summarize"))
 					.setIcon("captions")
 					.onClick(() => void this.transcribeAndSummarizeFile(file))
 			);
@@ -361,7 +372,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		if (file.extension === "md") {
 			menu.addItem((item) =>
 				item
-					.setTitle("Summarize note")
+					.setTitle(t("Summarize note"))
 					.setIcon("captions")
 					.onClick(() => void this.summarizeNoteFile(file))
 			);
@@ -398,14 +409,14 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		await leaf.openFile(file);
 		const view = leaf.view;
 		if (!(view instanceof MarkdownView)) {
-			new Notice(`Could not open "${file.basename}" for editing.`);
+			new Notice(t('Could not open "{name}" for editing.', { name: file.basename }));
 			return;
 		}
 		await this.summarizeText(view.editor, view.editor.getValue(), false, file.basename);
 	}
 
 	private async summarizeText(editor: Editor, text: string, replaceSelection: boolean, fileLabel: string): Promise<void> {
-		const { jobId, signal } = this.beginPipelineJob(`Summarize “${fileLabel}”`);
+		const { jobId, signal } = this.beginPipelineJob(t("Summarize “{name}”", { name: fileLabel }));
 		try {
 			await runSummarizeTextPipeline(this.settings, { text, editor, replaceSelection, fileLabel }, { onProgress: (status) => this.showPipelineProgress(jobId, status), signal });
 		} catch (error) {
@@ -440,7 +451,9 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			return;
 		}
 		console.error(`ai-transcribe-summary: ${action} failed`, error);
-		new Notice(`${action[0].toUpperCase()}${action.slice(1)} failed: ${error instanceof Error ? error.message : String(error)}`);
+		const localizedAction = t(action);
+		const actionLabel = localizedAction === action ? `${action[0].toUpperCase()}${action.slice(1)}` : localizedAction;
+		new Notice(t("{action} failed: {message}", { action: actionLabel, message: error instanceof Error ? error.message : String(error) }));
 	}
 
 	/** Registers a new pipeline job with its own AbortController and returns its id/signal, to be passed to showPipelineProgress/endPipelineJob for the lifetime of that job. */
@@ -452,7 +465,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			id: `pipeline-${jobId}`,
 			kind: "pipeline",
 			title,
-			status: "Starting",
+			status: t("Starting"),
 			startedAt: Date.now(),
 			canCancel: true,
 		});
@@ -463,9 +476,9 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private stopPipelineJobs() {
 		for (const [jobId, controller] of this.pipelineJobControllers) {
 			controller.abort();
-			this.taskTracker.update(`pipeline-${jobId}`, { status: "Stopping", canCancel: false, progress: undefined });
+			this.taskTracker.update(`pipeline-${jobId}`, { status: t("Stopping"), canCancel: false, progress: undefined });
 		}
-		new Notice("Stopping...");
+		new Notice(t("Stopping..."));
 	}
 
 	private stopPipelineJob(taskId: string) {
@@ -473,7 +486,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		const controller = this.pipelineJobControllers.get(jobId);
 		if (!controller) return;
 		controller.abort();
-		this.taskTracker.update(taskId, { status: "Stopping", canCancel: false, progress: undefined });
+		this.taskTracker.update(taskId, { status: t("Stopping"), canCancel: false, progress: undefined });
 	}
 
 	private showPipelineProgress(jobId: number, update: ProgressUpdate) {
@@ -590,13 +603,13 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				microphoneDeviceId: this.settings.microphoneDeviceId,
 				bitrateKbps: this.settings.audioBitrateKbps,
 				silenceAutoStopMinutes: this.settings.silenceAutoStopMinutes,
-				onSilenceTimeout: () => this.autoStopRecording(`${this.settings.silenceAutoStopMinutes} minutes of silence`),
+				onSilenceTimeout: () => this.autoStopRecording(t("{minutes} minutes of silence", { minutes: this.settings.silenceAutoStopMinutes })),
 				onLevel: (bands) => this.updateRibbonLevel(bands),
 				onDeadMic: () => this.warnDeadMic(),
 			});
 		} catch (error) {
 			console.error("ai-transcribe-summary: failed to start recording", error);
-			new Notice("Could not start recording - check microphone permissions.");
+			new Notice(t("Could not start recording - check microphone permissions."));
 			return;
 		} finally {
 			this.transitioning = false;
@@ -616,15 +629,15 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.taskTracker.start({
 			id: "recording",
 			kind: "recording",
-			title: "Meeting recording",
-			status: "Recording",
+			title: t("Meeting recording"),
+			status: t("Recording"),
 			startedAt: this.segmentStartedAt,
 			canCancel: true,
 		});
 
 		setIcon(this.ribbonIconEl, "audio-lines");
 		this.ribbonIconEl.addClass("is-active");
-		this.ribbonIconEl.setAttribute("aria-label", "Stop meeting recording");
+		this.ribbonIconEl.setAttribute("aria-label", t("Stop meeting recording"));
 
 		this.statusBarItem.show();
 		this.updateStatusBar();
@@ -654,14 +667,14 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private warnDeadMic() {
 		if (this.deadMicWarned || this.state !== "recording") return;
 		this.deadMicWarned = true;
-		new Notice("No microphone input detected. Check your mic - this recording may come out empty.", 8000);
+		new Notice(t("No microphone input detected. Check your mic - this recording may come out empty."), 8000);
 	}
 
 	private pauseRecording() {
 		this.recorder.pause();
 		this.accumulatedMs += Date.now() - this.segmentStartedAt;
 		this.state = "paused";
-		this.taskTracker.update("recording", { status: "Paused" });
+		this.taskTracker.update("recording", { status: t("Paused") });
 		this.ribbonIconEl.addClass("is-paused");
 		this.resetRibbonLevel();
 		this.stopTimer();
@@ -672,7 +685,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.recorder.resume();
 		this.segmentStartedAt = Date.now();
 		this.state = "recording";
-		this.taskTracker.update("recording", { status: "Recording" });
+		this.taskTracker.update("recording", { status: t("Recording") });
 		this.ribbonIconEl.removeClass("is-paused");
 		this.updateStatusBar();
 		this.startTimer();
@@ -681,20 +694,20 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private async stopRecording() {
 		this.transitioning = true;
 		this.stopTimer();
-		this.taskTracker.update("recording", { status: "Finishing recording", canCancel: false });
+		this.taskTracker.update("recording", { status: t("Finishing recording"), canCancel: false });
 
 		let result: RecordingResult;
 		try {
 			result = await this.recorder.stop();
 		} catch (error) {
 			console.error("ai-transcribe-summary: failed to stop recording", error);
-			new Notice("Recording stop failed - no audio was saved.");
+			new Notice(t("Recording stop failed - no audio was saved."));
 			this.state = "idle";
 			this.transitioning = false;
 			setIcon(this.ribbonIconEl, "mic");
 			this.ribbonIconEl.removeClass("is-active");
 			this.ribbonIconEl.removeClass("is-paused");
-			this.ribbonIconEl.setAttribute("aria-label", "Start meeting recording");
+			this.ribbonIconEl.setAttribute("aria-label", t("Start meeting recording"));
 			this.resetRibbonLevel();
 			this.statusBarItem.hide();
 			this.taskTracker.finish("recording");
@@ -706,28 +719,28 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		setIcon(this.ribbonIconEl, "mic");
 		this.ribbonIconEl.removeClass("is-active");
 		this.ribbonIconEl.removeClass("is-paused");
-		this.ribbonIconEl.setAttribute("aria-label", "Start meeting recording");
+		this.ribbonIconEl.setAttribute("aria-label", t("Start meeting recording"));
 		this.resetRibbonLevel();
 
 		if (result.durationMs < MIN_RECORDING_MS) {
 			this.taskTracker.finish("recording");
-			new Notice("Recording was too short to transcribe - nothing was saved.");
+			new Notice(t("Recording was too short to transcribe - nothing was saved."));
 			return;
 		}
 
 		// Raw audio is always preserved regardless of what transcription/summary do downstream.
 		let savedFile: TFile | undefined;
 		if (this.settings.saveAudioFile) {
-			this.taskTracker.update("recording", { status: "Saving audio" });
+			this.taskTracker.update("recording", { status: t("Saving audio") });
 			savedFile = await this.saveRecording(result);
 		}
 		this.taskTracker.finish("recording");
 
 		if (result.durationMs > LONG_RECORDING_WARNING_MS) {
 			new Notice(
-				`This recording is over ${Math.round(LONG_RECORDING_WARNING_MS / (60 * 60 * 1000))} hours long. If it needs to be split for transcription, decoding it may use a lot of memory and could fail on this device.${
-					savedFile ? " The audio file is already saved, so it's safe either way." : ""
-				}`,
+				`${t("This recording is over {hours} hours long. If it needs to be split for transcription, decoding it may use a lot of memory and could fail on this device.", {
+					hours: Math.round(LONG_RECORDING_WARNING_MS / (60 * 60 * 1000)),
+				})}${savedFile ? t(" The audio file is already saved, so it's safe either way.") : ""}`,
 				10000
 			);
 		}
@@ -791,7 +804,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	private async runPipeline(source: AudioSource) {
-		const { jobId, signal } = this.beginPipelineJob(`Process “${source.baseName}”`);
+		const { jobId, signal } = this.beginPipelineJob(t("Process “{name}”", { name: source.baseName }));
 		try {
 			await runTranscribeAndSummarizePipeline(this.app, this.settings, source, {
 				targetView: this.lastMarkdownView,
@@ -813,12 +826,12 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			if (!existingFolder) {
 				await this.app.vault.createFolder(folderPath);
 			} else if (!(existingFolder instanceof TFolder)) {
-				new Notice(`Audio folder "${folderPath}" is not a folder - recording not saved.`);
+				new Notice(t('Audio folder "{path}" is not a folder - recording not saved.', { path: folderPath }));
 				return undefined;
 			}
 		} catch (error) {
 			console.error("ai-transcribe-summary: failed to create audio folder", error);
-			new Notice("Failed to create audio folder - recording not saved. See console for details.");
+			new Notice(t("Failed to create audio folder - recording not saved. See console for details."));
 			return undefined;
 		}
 
@@ -830,11 +843,11 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		try {
 			const arrayBuffer = await result.blob.arrayBuffer();
 			const file = await this.app.vault.createBinary(filePath, arrayBuffer);
-			new Notice(`Recording saved to ${filePath}`);
+			new Notice(t("Recording saved to {path}", { path: filePath }));
 			return file;
 		} catch (error) {
 			console.error("ai-transcribe-summary: failed to save recording", error);
-			new Notice("Failed to save recording audio file - see console for details.");
+			new Notice(t("Failed to save recording audio file - see console for details."));
 			return undefined;
 		}
 	}
@@ -859,7 +872,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		// check below still runs regardless, so a long recording auto-stops even mid-pipeline-job.
 		if (this.activePipelineJobs.size === 0) {
 			const isPaused = this.state === "paused";
-			const label = isPaused ? "Paused" : "Recording";
+			const label = t(isPaused ? "Paused" : "Recording");
 			this.statusBarDotEl.show();
 			this.statusBarDotEl.toggleClass("is-paused", isPaused);
 			this.statusBarTextEl.setText(`${label} ${formatElapsed(elapsed)}`);
@@ -867,14 +880,14 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 		const maxMs = this.settings.maxRecordingHours * 60 * 60 * 1000;
 		if (this.state === "recording" && maxMs > 0 && elapsed >= maxMs) {
-			this.autoStopRecording(`the ${this.settings.maxRecordingHours}-hour maximum recording duration`);
+			this.autoStopRecording(t("the {hours}-hour maximum recording duration", { hours: this.settings.maxRecordingHours }));
 		}
 	}
 
 	/** Stops the recording without the usual confirm-before-stopping prompt, since the user isn't the one initiating it. */
 	private autoStopRecording(reason: string) {
 		if (this.state === "idle" || this.transitioning) return;
-		new Notice(`Recording auto-stopped: reached ${reason}.`);
+		new Notice(t("Recording auto-stopped: reached {reason}.", { reason }));
 		void this.stopRecording();
 	}
 
@@ -889,6 +902,14 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 	async loadSettings() {
 		const saved = ((await this.loadData()) ?? {}) as Partial<AiTranscribeSummarySettings>;
+		const summaryPrompt =
+			!saved.summaryPrompt || saved.summaryPrompt === ENGLISH_DEFAULT_SUMMARY_PROMPT || saved.summaryPrompt === RUSSIAN_DEFAULT_SUMMARY_PROMPT
+				? DEFAULT_SUMMARY_PROMPT
+				: saved.summaryPrompt;
+		const cleanupPrompt =
+			!saved.cleanupPrompt || saved.cleanupPrompt === ENGLISH_DEFAULT_CLEANUP_PROMPT || saved.cleanupPrompt === RUSSIAN_DEFAULT_CLEANUP_PROMPT
+				? DEFAULT_CLEANUP_PROMPT
+				: saved.cleanupPrompt;
 
 		// Object.assign only merges top-level keys - a saved settings file from
 		// before a field was added to a nested per-provider object (e.g.
@@ -897,6 +918,8 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.settings = {
 			...DEFAULT_SETTINGS,
 			...saved,
+			summaryPrompt,
+			cleanupPrompt,
 			providers: {
 				openai: { ...DEFAULT_SETTINGS.providers.openai, ...saved.providers?.openai },
 				openrouter: { ...DEFAULT_SETTINGS.providers.openrouter, ...saved.providers?.openrouter },

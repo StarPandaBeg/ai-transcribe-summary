@@ -1,5 +1,6 @@
 import { RequestUrlParam, RequestUrlResponse } from "obsidian";
 import { chunkAtSilence, needsChunking } from "../audio/chunker";
+import { t } from "../i18n";
 import { logDebug } from "../log";
 import type { ProgressCallback } from "../progress";
 import { encodeMultipartFormData } from "./multipart";
@@ -61,7 +62,7 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 
 	async transcribe(request: TranscriptionRequest): Promise<TranscriptionResult> {
 		if (!this.config.apiKey) {
-			throw new Error(`${PROVIDER_LABELS[this.id]} API key is not set. Add it in Settings under "${PROVIDER_LABELS[this.id]}".`);
+			throw new Error(t('{provider} API key is not set. Add it in Settings under "{provider}".', { provider: PROVIDER_LABELS[this.id] }));
 		}
 
 		const onProgress = request.onProgress ?? (() => {});
@@ -75,7 +76,7 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 
 		let pieces: TranscribedPiece[];
 		if (chunked) {
-			if (decodeBeforeUpload) onProgress({ status: "Extracting audio from video" });
+			if (decodeBeforeUpload) onProgress({ status: t("Extracting audio from video") });
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.
@@ -123,13 +124,13 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 				if (done) return;
 				if (totalChunks === undefined) {
 					totalChunks = piece.chunkCount;
-					onProgress({ status: `Transcribing 0 of ${totalChunks} chunks`, completed: 0, total: totalChunks, unit: "chunks" });
+					onProgress({ status: t("Transcribing {completed} of {total} chunks", { completed: 0, total: totalChunks }), completed: 0, total: totalChunks, unit: "chunks" });
 				}
 
 				results[piece.chunkIndex] = await this.transcribeOnePiece(piece, options, piece.chunkIndex, signal);
 				completedCount++;
 				onProgress({
-					status: `Transcribed ${completedCount} of ${piece.chunkCount} chunks`,
+					status: t("Transcribed {completed} of {total} chunks", { completed: completedCount, total: piece.chunkCount }),
 					completed: completedCount,
 					total: piece.chunkCount,
 					unit: "chunks",
@@ -183,12 +184,13 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 			const detail = json?.error?.message ?? response.text;
 			if (response.status === 413) {
 				throw new Error(
-					`Transcription failed on chunk ${index + 1} (HTTP 413: payload too large). ` +
-						`The "${this.config.apiModel}" model has a smaller upload limit than the ~22MB chunk size this plugin targets. ` +
-						`Try a different transcription model (e.g. "whisper-1") or lower your recording bitrate in Settings.`
+					t("Transcription failed on chunk {chunk} (HTTP 413: payload too large). The \"{model}\" model has a smaller upload limit than the ~22MB chunk size this plugin targets. Try a different transcription model (e.g. \"whisper-1\") or lower your recording bitrate in Settings.", {
+						chunk: index + 1,
+						model: this.config.apiModel,
+					})
 				);
 			}
-			throw new Error(`Transcription failed on chunk ${index + 1} (HTTP ${response.status}): ${detail}`);
+			throw new Error(t("Transcription failed on chunk {chunk} (HTTP {status}): {detail}", { chunk: index + 1, status: response.status, detail }));
 		}
 
 		const responseText = typeof json?.text === "string" ? json.text.trim() : "";

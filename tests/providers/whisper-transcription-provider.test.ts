@@ -8,6 +8,7 @@ const { chunkAtSilenceMock, needsChunkingMock, requestUrlMock } = vi.hoisted(() 
 }));
 
 vi.mock("obsidian", () => ({
+	getLanguage: () => "en",
 	requestUrl: requestUrlMock,
 	Notice: class {
 		constructor(_message: string, _duration?: number) {}

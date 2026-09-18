@@ -1,4 +1,5 @@
 import type { AudioBitrateKbps } from "../settings";
+import { t } from "../i18n";
 
 /** First supported mimeType wins - Opus is efficient at low bitrates (good fit for the 32kbps default). */
 const CANDIDATE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"];
@@ -131,7 +132,7 @@ export class AudioRecorder {
 	async start(options: AudioRecorderOptions): Promise<void> {
 		const mimeType = pickSupportedMimeType();
 		if (!mimeType) {
-			throw new Error("This browser does not support any recordable audio format (MediaRecorder unavailable).");
+			throw new Error(t("This browser does not support any recordable audio format (MediaRecorder unavailable)."));
 		}
 
 		const stream = await navigator.mediaDevices.getUserMedia({

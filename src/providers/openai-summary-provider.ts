@@ -1,4 +1,5 @@
 import { RequestUrlParam, RequestUrlResponse } from "obsidian";
+import { t } from "../i18n";
 import { logDebug } from "../log";
 import { RequestAbortedError, requestUrlWithTimeout } from "./request-timeout";
 import { SUMMARY_PROVIDER_SCHEMA, type SummaryProviderId } from "../settings";
@@ -37,7 +38,7 @@ export class OpenAiSummaryProvider implements SummaryProvider {
 
 	async summarize(request: SummaryRequest): Promise<SummaryResult> {
 		if (!this.config.apiKey) {
-			throw new Error(`${SUMMARY_PROVIDER_SCHEMA[this.id].label} API key is not set. Add it in Settings under Summary generation.`);
+			throw new Error(t("{provider} API key is not set. Add it in Settings under Summary.", { provider: SUMMARY_PROVIDER_SCHEMA[this.id].label }));
 		}
 
 		const step = request.step ?? "summary";
@@ -69,12 +70,12 @@ export class OpenAiSummaryProvider implements SummaryProvider {
 
 		if (response.status >= 400) {
 			const detail = json?.error?.message ?? response.text;
-			throw new Error(`Summary generation failed (HTTP ${response.status}): ${detail}`);
+			throw new Error(t("Summary generation failed (HTTP {status}): {detail}", { status: response.status, detail }));
 		}
 
 		const summary = json?.choices?.[0]?.message?.content;
 		if (typeof summary !== "string" || !summary.trim()) {
-			throw new Error("Summary generation returned an empty response.");
+			throw new Error(t("Summary generation returned an empty response."));
 		}
 
 		return { summary };

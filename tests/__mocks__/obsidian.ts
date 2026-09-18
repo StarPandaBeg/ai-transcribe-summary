@@ -10,6 +10,16 @@ export class Notice {
 	constructor(_message: string, _duration?: number) {}
 }
 
+let language = "en";
+
+export function getLanguage(): string {
+	return language;
+}
+
+export function setTestLanguage(value: string): void {
+	language = value;
+}
+
 export function requestUrl(): never {
 	throw new Error("requestUrl is not implemented in tests - mock it at the call site instead of hitting this stub.");
 }

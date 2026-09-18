@@ -1,8 +1,9 @@
 import { RequestUrlParam, RequestUrlResponse, requestUrl } from "obsidian";
+import { t } from "../i18n";
 
 /** Thrown when `signal` is aborted while a request is in flight - distinguished from a timeout/network error so callers can treat user-initiated cancellation differently (no error Notice, no rescue-transcript noise). */
 export class RequestAbortedError extends Error {
-	constructor(message = "Request was cancelled.") {
+	constructor(message = t("Request was cancelled.")) {
 		super(message);
 		this.name = "RequestAbortedError";
 	}
@@ -29,7 +30,7 @@ export function requestUrlWithTimeout(params: RequestUrlParam, timeoutMs: number
 		};
 
 		const timer = window.setTimeout(() => {
-			settle(() => reject(new Error(`Request to ${params.url} timed out after ${Math.round(timeoutMs / 1000)}s`)));
+			settle(() => reject(new Error(t("Request to {url} timed out after {seconds}s", { url: params.url, seconds: Math.round(timeoutMs / 1000) }))));
 		}, timeoutMs);
 
 		const onAbort = () => settle(() => reject(new RequestAbortedError()));

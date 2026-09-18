@@ -35,6 +35,7 @@ This plugin is built around avoiding those failure modes specifically:
 - **Summarize an existing note** - turn any markdown note's text directly into a structured summary, no audio involved, via the command palette (**Summarize note**) or by right-clicking the note in the file explorer.
 - **Choice of transcription provider** - Whisper via OpenAI or OpenRouter.
 - **Choice of summary provider** - OpenAI, Google Gemini, or OpenRouter (OpenRouter also gives access to Anthropic and other Google models under one key).
+- **English and Russian interface** - commands, settings, notices, confirmation dialogs, and task progress follow Obsidian's interface language automatically.
 - **Speaking language hint** - tell Whisper what language you're speaking (or leave it on auto-detect) to improve transcription accuracy and speed, especially on short or accented recordings.
 - **Optional transcript cleanup pass** - an LLM pass that removes filler words, false starts, and grammar mistakes before summarization. Saved transcripts keep the provider's original output so timestamped formats remain aligned with the audio.
 - **Custom vocabulary hints** - feed the transcription provider a list of names, jargon, or project terms to reduce misrecognition.

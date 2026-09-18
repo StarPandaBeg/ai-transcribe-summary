@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 /**
  * Splits an oversized recording into pieces at natural silence gaps, so a
  * >22MB Whisper upload doesn't hit the 25MB hard ceiling (PRD Tier 1).
@@ -37,14 +39,14 @@ export async function* chunkAtSilence(blob: Blob, targetChunkBytes = WHISPER_CHU
 		buffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
 	} catch (error) {
 		throw new Error(
-			"The audio track couldn't be decoded. The file may not contain audio, or its media codec may not be supported by this version of Obsidian.",
+			t("The audio track couldn't be decoded. The file may not contain audio, or its media codec may not be supported by this version of Obsidian."),
 			{ cause: error }
 		);
 	} finally {
 		await audioContext.close();
 	}
 	if (buffer.numberOfChannels === 0 || buffer.length === 0) {
-		throw new Error("The media file does not contain a usable audio track.");
+		throw new Error(t("The media file does not contain a usable audio track."));
 	}
 
 	const splitPoints = findSilenceSplitPoints(buffer, targetChunkBytes);
