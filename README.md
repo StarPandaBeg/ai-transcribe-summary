@@ -43,7 +43,7 @@ This plugin is built around avoiding those failure modes specifically:
 - **Silent-recording warning** - if a recording or existing audio file has no detectable signal, you're warned before it's sent off for transcription, with the option to proceed anyway.
 - **Cancel anytime** - stop an in-progress transcription or summary from the command palette; the audio you already have stays saved either way.
 - **Live status bar progress** - see recording time while recording, and the current pipeline stage (e.g. "Generating summary") while processing, including when more than one job is running at once.
-- **Dedicated task center** - open the **AI tasks** sidebar from the ribbon, command palette, or status bar to see every active recording, transcription, and summary with its current stage, elapsed time, and an individual stop control.
+- **Dedicated task center** - open the **AI tasks** sidebar from the ribbon, command palette, or status bar to see every active recording, transcription, and summary with its current stage, elapsed time, and an individual stop control. Chunked transcription and long-summary map-reduce jobs also show completed/total work and a 0–100% progress bar.
 
 ## Getting started
 

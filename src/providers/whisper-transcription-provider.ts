@@ -1,6 +1,7 @@
 import { RequestUrlParam, RequestUrlResponse } from "obsidian";
 import { chunkAtSilence, needsChunking } from "../audio/chunker";
 import { logDebug } from "../log";
+import type { ProgressCallback } from "../progress";
 import { encodeMultipartFormData } from "./multipart";
 import { hasRepetitionLoop } from "./repetition-detector";
 import { RequestAbortedError, requestUrlWithTimeout } from "./request-timeout";
@@ -31,6 +32,8 @@ interface TimedAudioPiece {
 	mimeType: string;
 	startSeconds: number;
 	endSeconds?: number;
+	chunkIndex: number;
+	chunkCount: number;
 }
 
 const MAX_RETRIES = 3;
@@ -72,13 +75,13 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 
 		let pieces: TranscribedPiece[];
 		if (chunked) {
-			if (decodeBeforeUpload) onProgress("Extracting audio from video");
+			if (decodeBeforeUpload) onProgress({ status: "Extracting audio from video" });
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.
 			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(request.audio), options, onProgress, signal);
 		} else {
-			const piece = { data: await request.audio.arrayBuffer(), mimeType: request.audio.type || request.mimeType, startSeconds: 0 };
+			const piece = { data: await request.audio.arrayBuffer(), mimeType: request.audio.type || request.mimeType, startSeconds: 0, chunkIndex: 0, chunkCount: 1 };
 			pieces = [await this.transcribeOnePiece(piece, options, 0, signal)];
 		}
 
@@ -101,30 +104,36 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 	private async transcribeChunksConcurrently(
 		pieces: AsyncIterable<TimedAudioPiece, void, unknown>,
 		options: { vocabularyHints: string; language: string },
-		onProgress: (status: string) => void,
+		onProgress: ProgressCallback,
 		signal: AbortSignal | undefined
 	): Promise<TranscribedPiece[]> {
 		const iterator = pieces[Symbol.asyncIterator]();
 		const results: TranscribedPiece[] = [];
-		let nextIndex = 0;
 		let completedCount = 0;
+		let totalChunks: number | undefined;
 
-		// chunkAtSilence doesn't expose a chunk total up front (chunks are found lazily, one at
-		// a time), and workers upload concurrently, so completion order doesn't match chunk
-		// order either - "Transcribed N chunks so far" is the only accurate progress shape
-		// available without pre-draining the generator, which would defeat its memory-bounded
-		// point (see the comment at the call site).
+		// The first yielded chunk carries the total discovered during decoding. Completion count
+		// is shared across workers because uploads finish out of order, while results remain stored
+		// by their original index for deterministic transcript ordering.
 		const worker = async () => {
 			for (;;) {
 				if (signal?.aborted) throw new RequestAbortedError();
 
 				const { value: piece, done } = await iterator.next();
 				if (done) return;
+				if (totalChunks === undefined) {
+					totalChunks = piece.chunkCount;
+					onProgress({ status: `Transcribing 0 of ${totalChunks} chunks`, completed: 0, total: totalChunks, unit: "chunks" });
+				}
 
-				const index = nextIndex++;
-				results[index] = await this.transcribeOnePiece(piece, options, index, signal);
+				results[piece.chunkIndex] = await this.transcribeOnePiece(piece, options, piece.chunkIndex, signal);
 				completedCount++;
-				onProgress(`Transcribed ${completedCount} chunk${completedCount === 1 ? "" : "s"} so far`);
+				onProgress({
+					status: `Transcribed ${completedCount} of ${piece.chunkCount} chunks`,
+					completed: completedCount,
+					total: piece.chunkCount,
+					unit: "chunks",
+				});
 			}
 		};
 

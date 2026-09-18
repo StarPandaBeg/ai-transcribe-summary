@@ -49,6 +49,7 @@ describe("summarizeLongTranscript", () => {
 		}
 
 		expect(result.summary).toBe(`digest-${calls.length}`);
-		expect(onProgress).toHaveBeenCalledWith(expect.stringContaining("Combining"));
+		expect(onProgress).toHaveBeenCalledWith({ status: "Combining summary", completed: calls.length - 1, total: calls.length, unit: "steps" });
+		expect(onProgress).toHaveBeenLastCalledWith({ status: "Summary complete", completed: calls.length, total: calls.length, unit: "steps" });
 	});
 });

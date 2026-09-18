@@ -9,10 +9,11 @@ describe("TaskTracker", () => {
 
 		tracker.start({ id: "first", kind: "pipeline", title: "First", status: "Starting", startedAt: 1, canCancel: true });
 		tracker.start({ id: "second", kind: "recording", title: "Recording", status: "Recording", startedAt: 2, canCancel: true });
-		tracker.update("first", { status: "Transcribing" });
+		tracker.update("first", { status: "Transcribing", progress: { completed: 2, total: 5, unit: "chunks" } });
 
 		expect(tracker.getTasks().map((task) => task.id)).toEqual(["first", "second"]);
 		expect(tracker.getTasks()[0].status).toBe("Transcribing");
+		expect(tracker.getTasks()[0].progress).toEqual({ completed: 2, total: 5, unit: "chunks" });
 
 		tracker.finish("first");
 		expect(tracker.getTasks().map((task) => task.id)).toEqual(["second"]);

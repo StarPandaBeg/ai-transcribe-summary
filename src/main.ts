@@ -15,6 +15,7 @@ import {
 import { AiTranscribeSummarySettingTab, AiTranscribeSummarySettings, DEFAULT_SETTINGS } from "./settings";
 import { TaskCenterView, TASK_CENTER_VIEW_TYPE } from "./task-center-view";
 import { TaskTracker } from "./task-tracker";
+import type { ProgressUpdate } from "./progress";
 
 /** audio/webm -> webm, audio/ogg;codecs=opus -> ogg, etc. */
 function extensionForMimeType(mimeType: string): string {
@@ -462,7 +463,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private stopPipelineJobs() {
 		for (const [jobId, controller] of this.pipelineJobControllers) {
 			controller.abort();
-			this.taskTracker.update(`pipeline-${jobId}`, { status: "Stopping", canCancel: false });
+			this.taskTracker.update(`pipeline-${jobId}`, { status: "Stopping", canCancel: false, progress: undefined });
 		}
 		new Notice("Stopping...");
 	}
@@ -472,12 +473,16 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		const controller = this.pipelineJobControllers.get(jobId);
 		if (!controller) return;
 		controller.abort();
-		this.taskTracker.update(taskId, { status: "Stopping", canCancel: false });
+		this.taskTracker.update(taskId, { status: "Stopping", canCancel: false, progress: undefined });
 	}
 
-	private showPipelineProgress(jobId: number, status: string) {
-		this.activePipelineJobs.set(jobId, status);
-		this.taskTracker.update(`pipeline-${jobId}`, { status });
+	private showPipelineProgress(jobId: number, update: ProgressUpdate) {
+		this.activePipelineJobs.set(jobId, update.status);
+		const progress =
+			update.completed !== undefined && update.total !== undefined && update.total > 0
+				? { completed: Math.max(0, Math.min(update.completed, update.total)), total: update.total, unit: update.unit }
+				: undefined;
+		this.taskTracker.update(`pipeline-${jobId}`, { status: update.status, progress });
 		this.statusBarItem.show();
 		this.statusBarDotEl.hide();
 		this.renderPipelineProgress();

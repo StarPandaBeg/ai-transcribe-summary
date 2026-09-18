@@ -20,7 +20,14 @@ vi.mock("../../src/audio/chunker", () => ({
 		chunkAtSilenceMock(blob);
 		const chunkCount = (blob as unknown as { chunkCount: number }).chunkCount;
 		for (let i = 0; i < chunkCount; i++) {
-			yield { data: new ArrayBuffer(1), mimeType: "audio/wav", startSeconds: i * 10, endSeconds: (i + 1) * 10 };
+			yield {
+				data: new ArrayBuffer(1),
+				mimeType: "audio/wav",
+				startSeconds: i * 10,
+				endSeconds: (i + 1) * 10,
+				chunkIndex: i,
+				chunkCount,
+			};
 		}
 	},
 }));
@@ -63,7 +70,9 @@ describe("WhisperTranscriptionProvider concurrent chunk uploads", () => {
 		expect(result.text).toBe("video text");
 		expect(result.segments).toEqual([{ start: 0.5, end: 2.25, text: "video text", speaker: 0 }]);
 		expect(chunkAtSilenceMock).toHaveBeenCalledWith(video);
-		expect(onProgress).toHaveBeenCalledWith("Extracting audio from video");
+		expect(onProgress).toHaveBeenCalledWith({ status: "Extracting audio from video" });
+		expect(onProgress).toHaveBeenCalledWith({ status: "Transcribing 0 of 1 chunks", completed: 0, total: 1, unit: "chunks" });
+		expect(onProgress).toHaveBeenCalledWith({ status: "Transcribed 1 of 1 chunks", completed: 1, total: 1, unit: "chunks" });
 	});
 
 	it("returns chunk texts in original order even when they complete out of order", async () => {

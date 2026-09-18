@@ -103,8 +103,26 @@ export class TaskCenterView extends ItemView {
 		const details = card.createDiv({ cls: "ai-transcribe-summary-task-details" });
 		details.createDiv({ cls: "ai-transcribe-summary-task-title", text: task.title });
 		const status = details.createDiv({ cls: "ai-transcribe-summary-task-status" });
-		status.createSpan({ cls: "ai-transcribe-summary-task-spinner", attr: { "aria-hidden": "true" } });
+		if (!task.progress) status.createSpan({ cls: "ai-transcribe-summary-task-spinner", attr: { "aria-hidden": "true" } });
 		status.createSpan({ text: task.status });
+		if (task.progress) {
+			const percentage = Math.round((task.progress.completed / task.progress.total) * 100);
+			const progressHeader = details.createDiv({ cls: "ai-transcribe-summary-progress-header" });
+			const unit = task.progress.unit ?? "steps";
+			progressHeader.createSpan({ text: `${task.progress.completed} / ${task.progress.total} ${unit}` });
+			progressHeader.createSpan({ text: `${percentage}%` });
+			const progressBar = details.createDiv({
+				cls: "ai-transcribe-summary-progress-track",
+				attr: {
+					role: "progressbar",
+					"aria-label": task.status,
+					"aria-valuemin": "0",
+					"aria-valuemax": task.progress.total.toString(),
+					"aria-valuenow": task.progress.completed.toString(),
+				},
+			});
+			progressBar.createDiv({ cls: "ai-transcribe-summary-progress-fill" }).style.setProperty("width", `${percentage}%`);
+		}
 		details.createDiv({ cls: "ai-transcribe-summary-task-elapsed", text: `Elapsed ${formatDuration(Date.now() - task.startedAt)}` });
 
 		if (task.canCancel) {

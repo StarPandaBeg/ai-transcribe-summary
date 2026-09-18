@@ -1,5 +1,11 @@
 export type TaskKind = "recording" | "pipeline";
 
+export interface TaskProgress {
+	completed: number;
+	total: number;
+	unit?: "chunks" | "steps";
+}
+
 export interface TrackedTask {
 	id: string;
 	kind: TaskKind;
@@ -7,6 +13,7 @@ export interface TrackedTask {
 	status: string;
 	startedAt: number;
 	canCancel: boolean;
+	progress?: TaskProgress;
 }
 
 export type TaskTrackerListener = (tasks: readonly TrackedTask[]) => void;
@@ -25,7 +32,7 @@ export class TaskTracker {
 		this.notify();
 	}
 
-	update(id: string, changes: Partial<Pick<TrackedTask, "status" | "title" | "canCancel">>): void {
+	update(id: string, changes: Partial<Pick<TrackedTask, "status" | "title" | "canCancel" | "progress">>): void {
 		const task = this.tasks.get(id);
 		if (!task) return;
 		this.tasks.set(id, { ...task, ...changes });

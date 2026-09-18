@@ -1,4 +1,5 @@
 import type { TranscriptionProviderId } from "../settings";
+import type { ProgressCallback } from "../progress";
 
 export type { TranscriptionProviderId };
 
@@ -12,8 +13,8 @@ export interface TranscriptionRequest {
 	vocabularyHints: string;
 	/** ISO-639-1 code (e.g. "en"), or empty to let the provider auto-detect. */
 	language: string;
-	/** Called with a short status string as a provider makes progress (e.g. per-chunk upload progress). */
-	onProgress?: (status: string) => void;
+	/** Called as the provider changes stage or completes a measurable portion of work. */
+	onProgress?: ProgressCallback;
 	/** When aborted, the provider stops waiting on/starting further requests and rejects with RequestAbortedError. */
 	signal?: AbortSignal;
 }

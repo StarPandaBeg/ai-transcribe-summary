@@ -1,5 +1,6 @@
 import { App, Editor, MarkdownView, normalizePath, Notice, TFile, TFolder } from "obsidian";
 import { logDebug } from "./log";
+import type { ProgressCallback } from "./progress";
 import { createSummaryProvider, createTranscriptionProvider, resolveSummaryApiKey } from "./providers/factory";
 import { summarizeLongTranscript } from "./providers/map-reduce-summarizer";
 import { RequestAbortedError } from "./providers/request-timeout";
@@ -25,9 +26,6 @@ export interface AudioSource {
 	/** The saved/source media file in the vault, when one exists - used for result placement and summary links. Undefined when saveAudioFile is off for a live recording. */
 	audioFile?: TFile;
 }
-
-/** Called with a short human-readable status as the pipeline moves through stages, so a caller can mirror it in the status bar. */
-export type ProgressCallback = (status: string) => void;
 
 /** True when a recording needs an actual transcription API call - either the transcript JSON is wanted or its text feeds summary generation. */
 export function needsTranscription(settings: AiTranscribeSummarySettings): boolean {
@@ -129,7 +127,7 @@ export async function runTranscribeAndSummarizePipeline(
 	const transcriptionProvider = createTranscriptionProvider(settings);
 	logDebug("transcription provider resolved", transcriptionProvider.id);
 
-	onProgress("Transcribing");
+	onProgress({ status: "Transcribing" });
 	new Notice(`Transcribing "${source.baseName}"...`);
 	const transcribeStartedAt = Date.now();
 	const transcription = await transcriptionProvider.transcribe({
@@ -157,7 +155,7 @@ export async function runTranscribeAndSummarizePipeline(
 	let transcriptWritten = false;
 	try {
 		if (settings.transcribeAudio) {
-			onProgress("Saving transcript");
+			onProgress({ status: "Saving transcript" });
 			await writeTranscriptFile(app, settings, source.baseName, transcription.segments, source.audioFile);
 			transcriptWritten = true;
 		}
@@ -177,7 +175,7 @@ export async function runTranscribeAndSummarizePipeline(
 			const cleanupProvider = createSummaryProvider(settings);
 			logDebug("cleanup provider resolved", cleanupProvider.id);
 
-			onProgress("Cleaning up transcript");
+			onProgress({ status: "Cleaning up transcript" });
 			new Notice(`Cleaning up transcript for "${source.baseName}"...`);
 			const cleanupStartedAt = Date.now();
 			const cleanupResult = await cleanupProvider.summarize({
@@ -193,7 +191,7 @@ export async function runTranscribeAndSummarizePipeline(
 		const summaryProvider = createSummaryProvider(settings);
 		logDebug("summary provider resolved", summaryProvider.id);
 
-		onProgress("Generating summary");
+		onProgress({ status: "Generating summary" });
 		new Notice(`Generating summary for "${source.baseName}"...`);
 		const summarizeStartedAt = Date.now();
 		const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: transcriptText, prompt: settings.summaryPrompt, signal }, onProgress);
@@ -201,7 +199,7 @@ export async function runTranscribeAndSummarizePipeline(
 
 		const summaryMarkdown = buildSummaryMarkdown(summaryResult.summary, transcription.repetitionWarning);
 
-		onProgress("Saving results");
+		onProgress({ status: "Saving results" });
 		// Re-checked here rather than trusting the activeView captured above: transcription/cleanup/summary
 		// are slow async calls, and the user may have switched away from that note (or it may just be a stale
 		// background tab) by the time we're ready to write. Inserting into a note that's no longer on screen
@@ -289,7 +287,7 @@ export async function runSummarizeTextPipeline(
 	const summaryProvider = createSummaryProvider(settings);
 	logDebug("summary provider resolved", summaryProvider.id);
 
-	onProgress("Generating summary");
+	onProgress({ status: "Generating summary" });
 	new Notice(`Generating summary for "${source.fileLabel}"...`);
 	const summarizeStartedAt = Date.now();
 	const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: source.text, prompt: settings.summaryPrompt, signal }, onProgress);
