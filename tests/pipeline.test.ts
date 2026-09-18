@@ -10,7 +10,7 @@ vi.mock("../src/settings", () => ({}));
 vi.mock("../src/providers/factory", () => ({}));
 vi.mock("../src/providers/map-reduce-summarizer", () => ({}));
 
-const { applyFileNameTemplate, isAudioFile, isSupportedMediaFile, isVideoFile, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } =
+const { applyFileNameTemplate, buildTranscriptJson, isAudioFile, isSupportedMediaFile, isVideoFile, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } =
 	await import("../src/pipeline");
 
 /** Minimal fake App - only the vault.getAbstractFileByPath lookup that resolveNonCollidingPath(WithExtension) reads. `existingPaths` mimics files already present in the vault. */
@@ -58,26 +58,32 @@ describe("file naming end-to-end (audio/transcript/summary sharing one folder)",
 	it("produces three distinct file names from one shared folder and one shared audio base name", () => {
 		const app = fakeApp([]);
 		const audioPath = resolveNonCollidingPathWithExtension(app, "meetings", audioBaseName, "webm");
-		const transcriptPath = resolveNonCollidingPath(fakeApp([audioPath]), "meetings", applyFileNameTemplate("{name}-transcript", audioBaseName));
+		const transcriptPath = resolveNonCollidingPathWithExtension(fakeApp([audioPath]), "meetings", applyFileNameTemplate("{name}-transcript", audioBaseName), "json");
 		const summaryPath = resolveNonCollidingPath(fakeApp([audioPath, transcriptPath]), "meetings", applyFileNameTemplate("{name}-summary", audioBaseName));
 
 		expect(new Set([audioPath, transcriptPath, summaryPath]).size).toBe(3);
 		expect(audioPath).toBe("meetings/2026-09-03 14-05-09.webm");
-		expect(transcriptPath).toBe("meetings/2026-09-03 14-05-09-transcript.md");
+		expect(transcriptPath).toBe("meetings/2026-09-03 14-05-09-transcript.json");
 		expect(summaryPath).toBe("meetings/2026-09-03 14-05-09-summary.md");
 	});
 
 	it("uses the existing audio file's own name directly when re-running on an already-named file", () => {
 		const app = fakeApp([]);
-		const transcriptPath = resolveNonCollidingPath(app, "meetings", "podcast-clip-transcript");
+		const transcriptPath = resolveNonCollidingPathWithExtension(app, "meetings", "podcast-clip-transcript", "json");
 		const summaryPath = resolveNonCollidingPath(fakeApp([transcriptPath]), "meetings", "podcast-clip-summary");
 
-		expect(transcriptPath).toBe("meetings/podcast-clip-transcript.md");
+		expect(transcriptPath).toBe("meetings/podcast-clip-transcript.json");
 		expect(summaryPath).toBe("meetings/podcast-clip-summary.md");
 	});
 });
 
 describe("output file settings", () => {
+	it("serializes the transcript as structured JSON", () => {
+		const json = buildTranscriptJson([{ start: 0, end: 4.2, text: "Hello", speaker: 0 }]);
+		expect(JSON.parse(json)).toEqual({ segments: [{ start: 0, end: 4.2, text: "Hello", speaker: 0 }] });
+		expect(json.endsWith("\n")).toBe(true);
+	});
+
 	it("expands every source-name token in a custom file name", () => {
 		expect(applyFileNameTemplate("Transcript — {name} ({name})", "team-sync")).toBe("Transcript — team-sync (team-sync)");
 	});

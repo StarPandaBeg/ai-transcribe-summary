@@ -13,6 +13,8 @@ const ANALYSIS_WINDOW_SECONDS = 0.05;
 export interface AudioChunk {
 	data: ArrayBuffer;
 	mimeType: string;
+	startSeconds: number;
+	endSeconds: number;
 }
 
 export function needsChunking(blob: Blob): boolean {
@@ -47,7 +49,12 @@ export async function* chunkAtSilence(blob: Blob, targetChunkBytes = WHISPER_CHU
 	let startSample = 0;
 
 	for (const splitSample of [...splitPoints, buffer.length]) {
-		yield { data: encodeWav(buffer, startSample, splitSample), mimeType: "audio/wav" };
+		yield {
+			data: encodeWav(buffer, startSample, splitSample),
+			mimeType: "audio/wav",
+			startSeconds: startSample / buffer.sampleRate,
+			endSeconds: splitSample / buffer.sampleRate,
+		};
 		startSample = splitSample;
 	}
 }

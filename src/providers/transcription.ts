@@ -20,8 +20,16 @@ export interface TranscriptionRequest {
 
 export interface TranscriptionResult {
 	text: string;
+	segments: TranscriptionSegment[];
 	/** True if repetition-loop scanning (PRD Tier 1) flagged abnormally repeated phrases in `text`. */
 	repetitionWarning: boolean;
+}
+
+export interface TranscriptionSegment {
+	start: number;
+	end: number;
+	text: string;
+	speaker: 0;
 }
 
 /**

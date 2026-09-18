@@ -36,9 +36,9 @@ This plugin is built around avoiding those failure modes specifically:
 - **Choice of transcription provider** - Whisper via OpenAI or OpenRouter.
 - **Choice of summary provider** - OpenAI, Google Gemini, or OpenRouter (OpenRouter also gives access to Anthropic and other Google models under one key).
 - **Speaking language hint** - tell Whisper what language you're speaking (or leave it on auto-detect) to improve transcription accuracy and speed, especially on short or accented recordings.
-- **Optional transcript cleanup pass** - an LLM pass that removes filler words, false starts, and grammar mistakes before the transcript is saved or summarized, without changing its meaning.
+- **Optional transcript cleanup pass** - an LLM pass that removes filler words, false starts, and grammar mistakes before summarization. The timestamped JSON keeps the provider's original text so every segment remains aligned with the audio.
 - **Custom vocabulary hints** - feed the transcription provider a list of names, jargon, or project terms to reduce misrecognition.
-- **Configurable output layout** - summary at your cursor or in a new note, transcript in the same note or a dedicated file, each in its own configurable vault folder.
+- **Structured transcript output** - transcripts are saved as JSON with timestamped segments (`start`, `end`, `text`, and `speaker`), while summaries can still go to your cursor or a dedicated note.
 - **Silence auto-stop and max-duration backstop** - stop worrying about leaving a recording running after everyone's left.
 - **Silent-recording warning** - if a recording or existing audio file has no detectable signal, you're warned before it's sent off for transcription, with the option to proceed anyway.
 - **Cancel anytime** - stop an in-progress transcription or summary from the command palette; the audio you already have stays saved either way.
@@ -101,8 +101,8 @@ All three providers meter usage per request; check their pricing/quota pages ([O
 | Summary generation | Summary provider, model, temperature, the prompt used to structure the summary, and whether to reuse your transcription API key |
 | Custom vocabulary | Names/jargon hints passed to the transcription provider |
 | Recording | Microphone selection, audio bitrate, silence auto-stop, max duration, start/stop confirmation |
-| Output placement | Where the raw audio, transcript, and summary are saved, and whether the transcript lives in the same note as the summary, a dedicated file, or is discarded after summarizing |
-| Output files | Save generated notes beside their source audio and customize transcript/summary file names with the `{name}` token |
+| Output placement | Where the raw audio, transcript JSON, and summary are saved, and whether the summary goes to the active note or a dedicated file |
+| Output files | Save transcript JSON and summary notes beside their source media and customize both file names with the `{name}` token |
 
 Every prompt (summary and cleanup) is fully editable, with a one-click reset back to the default.
 

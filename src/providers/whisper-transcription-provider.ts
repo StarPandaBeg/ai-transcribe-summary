@@ -4,7 +4,7 @@ import { logDebug } from "../log";
 import { encodeMultipartFormData } from "./multipart";
 import { hasRepetitionLoop } from "./repetition-detector";
 import { RequestAbortedError, requestUrlWithTimeout } from "./request-timeout";
-import { TranscriptionProvider, TranscriptionProviderId, TranscriptionRequest, TranscriptionResult } from "./transcription";
+import { TranscriptionProvider, TranscriptionProviderId, TranscriptionRequest, TranscriptionResult, TranscriptionSegment } from "./transcription";
 
 export interface WhisperProviderConfig {
 	apiKey: string;
@@ -17,6 +17,20 @@ export interface WhisperProviderConfig {
 interface WhisperResponseBody {
 	error?: { message?: string };
 	text?: string;
+	duration?: number;
+	segments?: Array<{ start?: unknown; end?: unknown; text?: unknown }>;
+}
+
+interface TranscribedPiece {
+	text: string;
+	segments: TranscriptionSegment[];
+}
+
+interface TimedAudioPiece {
+	data: ArrayBuffer;
+	mimeType: string;
+	startSeconds: number;
+	endSeconds?: number;
 }
 
 const MAX_RETRIES = 3;
@@ -56,24 +70,25 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 
 		const options = { vocabularyHints: request.vocabularyHints, language: request.language };
 
-		let texts: string[];
+		let pieces: TranscribedPiece[];
 		if (chunked) {
 			if (decodeBeforeUpload) onProgress("Extracting audio from video");
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.
-			texts = await this.transcribeChunksConcurrently(chunkAtSilence(request.audio), options, onProgress, signal);
+			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(request.audio), options, onProgress, signal);
 		} else {
-			const piece = { data: await request.audio.arrayBuffer(), mimeType: request.audio.type || request.mimeType };
-			texts = [await this.transcribeOnePiece(piece, options, 0, signal)];
+			const piece = { data: await request.audio.arrayBuffer(), mimeType: request.audio.type || request.mimeType, startSeconds: 0 };
+			pieces = [await this.transcribeOnePiece(piece, options, 0, signal)];
 		}
 
-		logDebug("transcribe: piece count", texts.length);
+		logDebug("transcribe: piece count", pieces.length);
 
-		const text = texts.join(" ").trim();
+		const text = pieces.map((piece) => piece.text).join(" ").trim();
+		const segments = pieces.flatMap((piece) => piece.segments);
 		const repetitionWarning = hasRepetitionLoop(text);
-		logDebug("transcribe: complete", { textLength: text.length, repetitionWarning });
-		return { text, repetitionWarning };
+		logDebug("transcribe: complete", { textLength: text.length, segmentCount: segments.length, repetitionWarning });
+		return { text, segments, repetitionWarning };
 	}
 
 	/**
@@ -84,13 +99,13 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 	 * original chunk order even though completion order may differ.
 	 */
 	private async transcribeChunksConcurrently(
-		pieces: AsyncIterable<{ data: ArrayBuffer; mimeType: string }, void, unknown>,
+		pieces: AsyncIterable<TimedAudioPiece, void, unknown>,
 		options: { vocabularyHints: string; language: string },
 		onProgress: (status: string) => void,
 		signal: AbortSignal | undefined
-	): Promise<string[]> {
+	): Promise<TranscribedPiece[]> {
 		const iterator = pieces[Symbol.asyncIterator]();
-		const results: string[] = [];
+		const results: TranscribedPiece[] = [];
 		let nextIndex = 0;
 		let completedCount = 0;
 
@@ -120,15 +135,16 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 	}
 
 	private async transcribeOnePiece(
-		piece: { data: ArrayBuffer; mimeType: string },
+		piece: TimedAudioPiece,
 		options: { vocabularyHints: string; language: string },
 		index: number,
 		signal: AbortSignal | undefined
-	): Promise<string> {
+	): Promise<TranscribedPiece> {
 		const extension = extensionForMimeType(piece.mimeType);
 		const { contentType, body } = encodeMultipartFormData(
 			[
 				{ name: "model", value: this.config.apiModel },
+				{ name: "response_format", value: "verbose_json" },
 				...(options.vocabularyHints ? [{ name: "prompt", value: options.vocabularyHints }] : []),
 				...(options.language ? [{ name: "language", value: options.language }] : []),
 			],
@@ -166,7 +182,25 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 			throw new Error(`Transcription failed on chunk ${index + 1} (HTTP ${response.status}): ${detail}`);
 		}
 
-		return typeof json?.text === "string" ? json.text : "";
+		const responseText = typeof json?.text === "string" ? json.text.trim() : "";
+		const segments = this.parseSegments(json, piece, responseText);
+		const text = responseText || segments.map((segment) => segment.text).join(" ");
+		return { text, segments };
+	}
+
+	private parseSegments(json: WhisperResponseBody | undefined, piece: TimedAudioPiece, fallbackText: string): TranscriptionSegment[] {
+		const responseSegments = Array.isArray(json?.segments) ? json.segments : [];
+		const segments = responseSegments.flatMap((segment): TranscriptionSegment[] => {
+			if (typeof segment.start !== "number" || !Number.isFinite(segment.start) || segment.start < 0) return [];
+			if (typeof segment.end !== "number" || !Number.isFinite(segment.end) || segment.end < segment.start) return [];
+			if (typeof segment.text !== "string" || !segment.text.trim()) return [];
+			return [{ start: piece.startSeconds + segment.start, end: piece.startSeconds + segment.end, text: segment.text.trim(), speaker: 0 }];
+		});
+		if (segments.length > 0 || !fallbackText) return segments;
+
+		const responseDuration = typeof json?.duration === "number" && Number.isFinite(json.duration) && json.duration >= 0 ? json.duration : undefined;
+		const end = piece.endSeconds ?? (responseDuration === undefined ? piece.startSeconds : piece.startSeconds + responseDuration);
+		return [{ start: piece.startSeconds, end, text: fallbackText, speaker: 0 }];
 	}
 
 	/** Retries on thrown errors (network failures) and on HTTP 429/5xx responses (rate limits, transient server errors) - anything else, including a user-initiated abort, is returned/thrown as-is for the caller to handle. */
