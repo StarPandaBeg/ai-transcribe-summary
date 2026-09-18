@@ -10,8 +10,21 @@ vi.mock("../src/settings", () => ({}));
 vi.mock("../src/providers/factory", () => ({}));
 vi.mock("../src/providers/map-reduce-summarizer", () => ({}));
 
-const { applyFileNameTemplate, buildTranscriptJson, formatMediaLink, isAudioFile, isSupportedMediaFile, isVideoFile, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } =
-	await import("../src/pipeline");
+const {
+	applyFileNameTemplate,
+	buildTimestampedTranscriptMarkdown,
+	buildTranscriptContent,
+	buildTranscriptJson,
+	formatMediaLink,
+	formatTranscriptTimestamp,
+	isAudioFile,
+	isSupportedMediaFile,
+	isVideoFile,
+	resolveNonCollidingPath,
+	resolveNonCollidingPathWithExtension,
+	resolveResultFolder,
+	transcriptFileExtension,
+} = await import("../src/pipeline");
 
 describe("summary source media links", () => {
 	it("formats embedded players, ordinary links, and omitted references", () => {
@@ -86,10 +99,35 @@ describe("file naming end-to-end (audio/transcript/summary sharing one folder)",
 });
 
 describe("output file settings", () => {
-	it("serializes the transcript as structured JSON", () => {
-		const json = buildTranscriptJson([{ start: 0, end: 4.2, text: "Hello", speaker: 0 }]);
-		expect(JSON.parse(json)).toEqual({ segments: [{ start: 0, end: 4.2, text: "Hello", speaker: 0 }] });
+	const segments = [
+		{ start: 0, end: 4.2, text: "Hello", speaker: 0 as const },
+		{ start: 3661, end: 3665.9, text: "Long meeting", speaker: 0 as const },
+	];
+
+	it("serializes structured JSON transcripts", () => {
+		const json = buildTranscriptJson(segments);
+		expect(JSON.parse(json)).toEqual({ segments });
 		expect(json.endsWith("\n")).toBe(true);
+	});
+
+	it("restores the original plain transcript note format", () => {
+		expect(buildTranscriptContent("  Hello world  ", segments, "text")).toBe("## Full Transcript\n\nHello world\n");
+		expect(transcriptFileExtension("text")).toBe("md");
+	});
+
+	it("builds Markdown transcripts with segment time ranges", () => {
+		expect(formatTranscriptTimestamp(4.2)).toBe("00:04");
+		expect(formatTranscriptTimestamp(3661.9)).toBe("01:01:01");
+		expect(buildTimestampedTranscriptMarkdown(segments)).toBe(
+			"## Full Transcript\n\n**[00:00 – 00:04]** Hello\n\n**[01:01:01 – 01:01:05]** Long meeting\n"
+		);
+		expect(transcriptFileExtension("markdown")).toBe("md");
+	});
+
+	it("selects structured JSON content and extension", () => {
+		const json = buildTranscriptContent("Hello", segments, "json");
+		expect(JSON.parse(json)).toEqual({ segments });
+		expect(transcriptFileExtension("json")).toBe("json");
 	});
 
 	it("expands every source-name token in a custom file name", () => {

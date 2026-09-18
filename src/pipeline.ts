@@ -5,7 +5,7 @@ import { createSummaryProvider, createTranscriptionProvider, resolveSummaryApiKe
 import { summarizeLongTranscript } from "./providers/map-reduce-summarizer";
 import { RequestAbortedError } from "./providers/request-timeout";
 import type { TranscriptionSegment } from "./providers/transcription";
-import { AiTranscribeSummarySettings, SummaryMediaLinkMode, transcriptionKeyReuseTarget } from "./settings";
+import { AiTranscribeSummarySettings, SummaryMediaLinkMode, TranscriptOutputFormat, transcriptionKeyReuseTarget } from "./settings";
 
 export { RequestAbortedError };
 
@@ -27,7 +27,7 @@ export interface AudioSource {
 	audioFile?: TFile;
 }
 
-/** True when a recording needs an actual transcription API call - either the transcript JSON is wanted or its text feeds summary generation. */
+/** True when a recording needs an actual transcription API call - either a transcript file is wanted or its text feeds summary generation. */
 export function needsTranscription(settings: AiTranscribeSummarySettings): boolean {
 	return settings.transcribeAudio || settings.generateSummary;
 }
@@ -77,13 +77,13 @@ export function validateSummaryProviderConfig(settings: AiTranscribeSummarySetti
  * late even though a note is still open on screen.
  *
  * settings.transcribeAudio and settings.generateSummary are independent toggles:
- * - transcribeAudio controls only whether the timestamped transcript JSON is written;
+ * - transcribeAudio controls only whether a transcript file is written;
  *   it does NOT gate whether transcription happens.
  * - Transcription itself runs whenever transcribeAudio or generateSummary is on -
  *   summary/cleanup need transcript text even when the
  *   user doesn't want the raw transcript kept. See needsTranscription().
- * - cleanupTranscript only cleans the text passed into summary generation. The JSON
- *   retains provider segments verbatim so their text stays aligned with timestamps.
+ * - cleanupTranscript only cleans the text passed into summary generation. Saved
+ *   transcripts retain provider output so timestamped formats stay aligned with audio.
  * - When both transcribeAudio and generateSummary are off, nothing downstream of
  *   transcription would ever be written, so transcription is skipped entirely and
  *   the recording is audio-only (targetView has no effect in that case).
@@ -149,14 +149,14 @@ export async function runTranscribeAndSummarizePipeline(
 	// transcript that already cost a real transcription API call to produce. Catch it, save the
 	// raw transcript immediately so that cost isn't wasted, and tell the user where it landed
 	// instead of just surfacing the underlying error.
-	// Tracks whether the transcript JSON write below actually completed - the rescue
+	// Tracks whether the transcript file write below actually completed - the rescue
 	// path in the catch block uses this (rather than re-deriving it from settings) so it isn't
 	// skipped when a failure happens before that write runs, e.g. during cleanup.
 	let transcriptWritten = false;
 	try {
 		if (settings.transcribeAudio) {
 			onProgress({ status: "Saving transcript" });
-			await writeTranscriptFile(app, settings, source.baseName, transcription.segments, source.audioFile);
+			await writeTranscriptFile(app, settings, source.baseName, transcription.text, transcription.segments, source.audioFile);
 			transcriptWritten = true;
 		}
 
@@ -227,9 +227,9 @@ export async function runTranscribeAndSummarizePipeline(
 	} catch (error) {
 		const cancelled = error instanceof RequestAbortedError;
 		logDebug(cancelled ? "pipeline cancelled after transcription, saving raw transcript" : "pipeline failed after transcription, saving raw transcript", error);
-		// If the transcript JSON was already written above before the failure, it's
+		// If the transcript was already written above before the failure, it's
 		// already safe - don't also write a rescue copy alongside it.
-		const rescuePath = transcriptWritten ? undefined : await tryWriteRescueTranscript(app, settings, source, transcription.segments);
+		const rescuePath = transcriptWritten ? undefined : await tryWriteRescueTranscript(app, settings, source, transcription.text, transcription.segments);
 
 		if (cancelled) {
 			throw new RequestAbortedError(
@@ -307,13 +307,20 @@ export async function runSummarizeTextPipeline(
 }
 
 /** Best-effort rescue save of the raw transcript after a post-transcription failure - swallows its own errors so a failure here doesn't replace the original, more useful error with an unrelated file-write one. Named "-raw" since it's always the uncleaned transcript text, whether or not cleanup was enabled - the failure may be cleanup itself failing. */
-async function tryWriteRescueTranscript(app: App, settings: AiTranscribeSummarySettings, source: AudioSource, segments: TranscriptionSegment[]): Promise<string | undefined> {
+async function tryWriteRescueTranscript(
+	app: App,
+	settings: AiTranscribeSummarySettings,
+	source: AudioSource,
+	text: string,
+	segments: TranscriptionSegment[]
+): Promise<string | undefined> {
 	try {
 		const folderPath = resolveResultFolder(settings.transcriptFolder, source.audioFile, settings.saveResultsNextToSource);
 		await ensureFolder(app, folderPath);
 		const transcriptName = applyFileNameTemplate(settings.transcriptFileNameTemplate, source.baseName);
-		const rescuePath = resolveNonCollidingPathWithExtension(app, folderPath, `${transcriptName}-raw`, "json");
-		await app.vault.create(rescuePath, buildTranscriptJson(segments));
+		const extension = transcriptFileExtension(settings.transcriptOutputFormat);
+		const rescuePath = resolveNonCollidingPathWithExtension(app, folderPath, `${transcriptName}-raw`, extension);
+		await app.vault.create(rescuePath, buildTranscriptContent(text, segments, settings.transcriptOutputFormat));
 		logDebug("rescue transcript written", { path: rescuePath });
 		return rescuePath;
 	} catch (rescueError) {
@@ -331,6 +338,32 @@ function buildSummaryMarkdown(summary: string, repetitionWarning: boolean): stri
 
 export function buildTranscriptJson(segments: TranscriptionSegment[]): string {
 	return `${JSON.stringify({ segments }, null, 2)}\n`;
+}
+
+export function formatTranscriptTimestamp(seconds: number): string {
+	const totalSeconds = Math.max(0, Math.floor(seconds));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const remainingSeconds = totalSeconds % 60;
+	const clock = `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+	return hours > 0 ? `${hours.toString().padStart(2, "0")}:${clock}` : clock;
+}
+
+export function buildTimestampedTranscriptMarkdown(segments: TranscriptionSegment[]): string {
+	const lines = segments.map(
+		(segment) => `**[${formatTranscriptTimestamp(segment.start)} – ${formatTranscriptTimestamp(segment.end)}]** ${segment.text.trim()}`
+	);
+	return `## Full Transcript\n\n${lines.join("\n\n")}\n`;
+}
+
+export function transcriptFileExtension(format: TranscriptOutputFormat): "md" | "json" {
+	return format === "json" ? "json" : "md";
+}
+
+export function buildTranscriptContent(text: string, segments: TranscriptionSegment[], format: TranscriptOutputFormat): string {
+	if (format === "text") return `## Full Transcript\n\n${text.trim()}\n`;
+	if (format === "markdown") return buildTimestampedTranscriptMarkdown(segments);
+	return buildTranscriptJson(segments);
 }
 
 export function formatMediaLink(link: string, mode: SummaryMediaLinkMode): string {
@@ -367,18 +400,24 @@ async function writeIntoNewNote(
 	return notePath;
 }
 
-/** Writes the machine-readable transcript separately so timestamps remain structured data rather than Markdown presentation. */
 async function writeTranscriptFile(
 	app: App,
 	settings: AiTranscribeSummarySettings,
 	baseName: string,
+	text: string,
 	segments: TranscriptionSegment[],
 	audioFile: TFile | undefined
 ): Promise<string> {
 	const folderPath = resolveResultFolder(settings.transcriptFolder, audioFile, settings.saveResultsNextToSource);
 	await ensureFolder(app, folderPath);
-	const transcriptPath = resolveNonCollidingPathWithExtension(app, folderPath, applyFileNameTemplate(settings.transcriptFileNameTemplate, baseName), "json");
-	await app.vault.create(transcriptPath, buildTranscriptJson(segments));
+	const format = settings.transcriptOutputFormat;
+	const transcriptPath = resolveNonCollidingPathWithExtension(
+		app,
+		folderPath,
+		applyFileNameTemplate(settings.transcriptFileNameTemplate, baseName),
+		transcriptFileExtension(format)
+	);
+	await app.vault.create(transcriptPath, buildTranscriptContent(text, segments, format));
 	logDebug("transcript written to new note", { path: transcriptPath });
 	return transcriptPath;
 }

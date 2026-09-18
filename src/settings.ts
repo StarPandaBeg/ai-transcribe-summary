@@ -60,6 +60,7 @@ export const DEFAULT_TRANSCRIPT_FILE_NAME_TEMPLATE = "{name}-transcript";
 export const DEFAULT_SUMMARY_FILE_NAME_TEMPLATE = "{name}-summary";
 
 export type TranscriptionProviderId = "openai" | "openrouter";
+export type TranscriptOutputFormat = "text" | "markdown" | "json";
 
 export type SummaryPlacement = "active-note" | "dedicated-file";
 export type SummaryMediaLinkMode = "embed" | "link" | "none";
@@ -146,14 +147,14 @@ export interface AiTranscribeSummarySettings {
 	summaryProvider: SummaryProviderId;
 	summaryProviders: SummaryProviderSettingsMap;
 	summaryPrompt: string;
-	/** Controls whether the timestamped transcript JSON is saved. Transcription still runs when summary generation is enabled. */
+	/** Controls whether a transcript file is saved. Transcription still runs when summary generation is enabled. */
 	transcribeAudio: boolean;
 	/** When off, the pipeline stops after transcription - no LLM call, no summary note. */
 	generateSummary: boolean;
 	/** Reuse the transcription provider's own apiKey for summaries instead of a separate key. Only applies when summaryProvider matches transcriptionProvider (see transcriptionKeyReuseTarget). */
 	reuseWhisperKeyForSummary: boolean;
 
-	/** Optional LLM cleanup pass over the text used for summarization. Timestamped JSON retains the provider's original segments. */
+	/** Optional LLM cleanup pass over the text used for summarization. Saved transcripts retain the provider's original output. */
 	cleanupTranscript: boolean;
 	cleanupPrompt: string;
 
@@ -178,6 +179,7 @@ export interface AiTranscribeSummarySettings {
 	// Output: full transcript
 	transcriptFolder: string;
 	transcriptFileNameTemplate: string;
+	transcriptOutputFormat: TranscriptOutputFormat;
 
 	// Output: summary
 	/** "active-note" inserts at the cursor in the active note when one is open (live recording, or a
@@ -236,6 +238,7 @@ export const DEFAULT_SETTINGS: AiTranscribeSummarySettings = {
 
 	transcriptFolder: "_meetings/transcripts",
 	transcriptFileNameTemplate: DEFAULT_TRANSCRIPT_FILE_NAME_TEMPLATE,
+	transcriptOutputFormat: "json",
 
 	summaryPlacement: "active-note",
 	summaryFolder: "_meetings",
@@ -433,6 +436,8 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return settings.transcriptFolder;
 			case "transcriptFileNameTemplate":
 				return settings.transcriptFileNameTemplate;
+			case "transcriptOutputFormat":
+				return settings.transcriptOutputFormat;
 			case "cleanupTranscript":
 				return settings.cleanupTranscript;
 			case "cleanupPrompt":
@@ -565,6 +570,9 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 			case "transcriptFileNameTemplate":
 				settings.transcriptFileNameTemplate = (value as string).trim() || DEFAULT_TRANSCRIPT_FILE_NAME_TEMPLATE;
 				break;
+			case "transcriptOutputFormat":
+				settings.transcriptOutputFormat = value as TranscriptOutputFormat;
+				break;
 			case "cleanupTranscript":
 				settings.cleanupTranscript = value as boolean;
 				break;
@@ -590,8 +598,8 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return;
 		}
 
-		// Cleanup now feeds only summary generation; timestamped JSON must retain the provider's
-		// original segment text so its content remains aligned with the audio.
+		// Cleanup feeds only summary generation; saved transcript formats retain the provider's
+		// original output so timestamped variants stay aligned with the audio.
 		if (key === "generateSummary" && !settings.generateSummary) {
 			settings.cleanupTranscript = false;
 		}
@@ -658,12 +666,12 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				...this.buildTranscriptionProviderFields("openrouter"),
 				{
 					name: "Keep transcript",
-					desc: "Save a JSON file containing timestamped transcript segments. Transcription still runs when summary generation is enabled, even if this is off. Turn on 'Save audio file' too, or a recording with this and summary generation both off keeps nothing.",
+					desc: "Save the transcript in the format selected under Output files. Transcription still runs when summary generation is enabled, even if this is off. Turn on 'Save audio file' too, or a recording with this and summary generation both off keeps nothing.",
 					control: { type: "toggle", key: "transcribeAudio" },
 				},
 				{
 					name: "Transcript folder",
-					desc: "Vault folder where transcript JSON files are saved. When 'Save results next to source audio' is enabled, this is the fallback for recordings without a saved audio file.",
+					desc: "Vault folder where transcript files are saved. When 'Save results next to source audio' is enabled, this is the fallback for recordings without a saved audio file.",
 					visible: () => this.plugin.settings.transcribeAudio,
 					control: {
 						type: "folder",
@@ -1058,11 +1066,17 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 	}
 
 	private buildOutputFilesGroup(): SettingDefinitionItem {
-		const validateFileNameTemplate = (value: string, extension: string): string | undefined => {
+		const validateFileNameTemplate = (value: string, extension?: string): string | undefined => {
 			const trimmed = value.trim();
 			if (!trimmed) return "Enter a file name.";
 			if (/[\\/:*?"<>|]/.test(trimmed)) return 'File names can\'t contain \\, /, :, *, ?, ", <, >, or |.';
-			if (trimmed.toLowerCase().endsWith(extension)) return `Leave off the ${extension} extension.`;
+			if (extension && trimmed.toLowerCase().endsWith(extension)) return `Leave off the ${extension} extension.`;
+			return undefined;
+		};
+		const validateTranscriptFileNameTemplate = (value: string): string | undefined => {
+			const error = validateFileNameTemplate(value);
+			if (error) return error;
+			if (/\.(?:txt|md|json)$/i.test(value.trim())) return "Leave off the file extension.";
 			return undefined;
 		};
 
@@ -1072,18 +1086,32 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 			items: [
 				{
 					name: "Save results next to source audio",
-					desc: "Save transcript JSON files and new summary notes in the same folder as the source media file. The configured transcript and summary folders remain the fallback when there is no saved source file.",
+					desc: "Save transcript files and new summary notes in the same folder as the source media file. The configured transcript and summary folders remain the fallback when there is no saved source file.",
 					control: { type: "toggle", key: "saveResultsNextToSource" },
 				},
 				{
 					name: "Transcript file name",
-					desc: "Name used for the transcript JSON file. Use {name} for the source media file name; the .json extension is added automatically.",
+					desc: "Name used for the transcript file. Use {name} for the source media file name; the selected format's extension is added automatically.",
 					visible: () => this.plugin.settings.transcribeAudio,
 					control: {
 						type: "text",
 						key: "transcriptFileNameTemplate",
 						placeholder: DEFAULT_TRANSCRIPT_FILE_NAME_TEMPLATE,
-						validate: (value) => validateFileNameTemplate(value, ".json"),
+						validate: validateTranscriptFileNameTemplate,
+					},
+				},
+				{
+					name: "Transcript format",
+					desc: "Save the original plain transcript note, a readable Markdown transcript with timestamps, or structured JSON with timed segments for use by other plugins.",
+					visible: () => this.plugin.settings.transcribeAudio,
+					control: {
+						type: "dropdown",
+						key: "transcriptOutputFormat",
+						options: {
+							text: "Plain transcript",
+							markdown: "Markdown with timestamps",
+							json: "Structured JSON",
+						},
 					},
 				},
 				{
