@@ -3,9 +3,11 @@ import type { TranscriptionProviderId } from "../settings";
 export type { TranscriptionProviderId };
 
 export interface TranscriptionRequest {
-	/** Recorded (or right-click-retried) audio file. */
+	/** Recorded audio or the media file selected for transcription. */
 	audio: Blob;
 	mimeType: string;
+	/** Decode the media container and upload extracted WAV audio rather than the original file. */
+	extractAudio?: boolean;
 	/** Comma-separated names/jargon from settings, passed through where the provider supports it. */
 	vocabularyHints: string;
 	/** ISO-639-1 code (e.g. "en"), or empty to let the provider auto-detect. */

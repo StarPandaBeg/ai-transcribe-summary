@@ -50,13 +50,15 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 		const onProgress = request.onProgress ?? (() => {});
 		const signal = request.signal;
 
-		const chunked = needsChunking(request.audio);
-		logDebug("transcribe: audio size", request.audio.size, "bytes, chunking:", chunked, "model:", this.config.apiModel);
+		const decodeBeforeUpload = request.extractAudio === true;
+		const chunked = decodeBeforeUpload || needsChunking(request.audio);
+		logDebug("transcribe: audio size", request.audio.size, "bytes, chunking:", chunked, "extracting audio:", decodeBeforeUpload, "model:", this.config.apiModel);
 
 		const options = { vocabularyHints: request.vocabularyHints, language: request.language };
 
 		let texts: string[];
 		if (chunked) {
+			if (decodeBeforeUpload) onProgress("Extracting audio from video");
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.

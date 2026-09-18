@@ -33,11 +33,14 @@ export async function* chunkAtSilence(blob: Blob, targetChunkBytes = WHISPER_CHU
 		buffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
 	} catch (error) {
 		throw new Error(
-			"This recording is too large to upload but couldn't be split into smaller pieces (its audio format isn't supported for decoding). The original recording is still saved in your vault.",
+			"The audio track couldn't be decoded. The file may not contain audio, or its media codec may not be supported by this version of Obsidian.",
 			{ cause: error }
 		);
 	} finally {
 		await audioContext.close();
+	}
+	if (buffer.numberOfChannels === 0 || buffer.length === 0) {
+		throw new Error("The media file does not contain a usable audio track.");
 	}
 
 	const splitPoints = findSilenceSplitPoints(buffer, targetChunkBytes);

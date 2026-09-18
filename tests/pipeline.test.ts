@@ -10,7 +10,8 @@ vi.mock("../src/settings", () => ({}));
 vi.mock("../src/providers/factory", () => ({}));
 vi.mock("../src/providers/map-reduce-summarizer", () => ({}));
 
-const { applyFileNameTemplate, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } = await import("../src/pipeline");
+const { applyFileNameTemplate, isAudioFile, isSupportedMediaFile, isVideoFile, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } =
+	await import("../src/pipeline");
 
 /** Minimal fake App - only the vault.getAbstractFileByPath lookup that resolveNonCollidingPath(WithExtension) reads. `existingPaths` mimics files already present in the vault. */
 function fakeApp(existingPaths: string[]) {
@@ -94,5 +95,25 @@ describe("output file settings", () => {
 	it("falls back to the configured folder without a saved source audio file", () => {
 		expect(resolveResultFolder("_meetings/transcripts", undefined, true)).toBe("_meetings/transcripts");
 		expect(resolveResultFolder("_meetings/transcripts", { path: "call.m4a" } as import("obsidian").TFile, false)).toBe("_meetings/transcripts");
+	});
+});
+
+describe("supported media files", () => {
+	const file = (extension: string) => ({ extension } as import("obsidian").TFile);
+
+	it("recognizes audio independently from video", () => {
+		expect(isAudioFile(file("mp3"))).toBe(true);
+		expect(isVideoFile(file("mp4"))).toBe(true);
+		expect(isAudioFile(file("mp4"))).toBe(false);
+	});
+
+	it("accepts common video extensions case-insensitively", () => {
+		for (const extension of ["MP4", "mov", "m4v", "mkv", "avi", "mpg", "mpeg"]) {
+			expect(isSupportedMediaFile(file(extension))).toBe(true);
+		}
+	});
+
+	it("rejects unrelated files", () => {
+		expect(isSupportedMediaFile(file("md"))).toBe(false);
 	});
 });

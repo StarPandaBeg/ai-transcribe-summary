@@ -31,7 +31,7 @@ This plugin is built around avoiding those failure modes specifically:
 ## Features
 
 - **In-app recording** - start, pause/resume, and stop meeting recordings from a ribbon icon, command palette, or hotkey.
-- **Right-click retry** - any `.webm`, `.mp3`, `.wav`, or `.m4a` file in your vault gets a "Transcribe & summarize" context menu item, so you can (re-)process audio you already have. Works from Obsidian's built-in file explorer and, if installed, the [Notebook Navigator](https://github.com/johansan/notebook-navigator) community plugin's file menu too.
+- **Audio and video transcription** - right-click a supported audio file (`.webm`, `.mp3`, `.wav`, `.m4a`) or video file (`.mp4`, `.mov`, `.m4v`, `.mkv`, `.avi`, `.mpg`, `.mpeg`) and choose "Transcribe & summarize". Video audio is extracted locally through Obsidian's media decoder and converted to WAV before upload; codec support depends on the installed Obsidian/Chromium version. Works from Obsidian's built-in file explorer and, if installed, the [Notebook Navigator](https://github.com/johansan/notebook-navigator) community plugin's file menu too.
 - **Summarize an existing note** - turn any markdown note's text directly into a structured summary, no audio involved, via the command palette (**Summarize note**) or by right-clicking the note in the file explorer.
 - **Choice of transcription provider** - Whisper via OpenAI or OpenRouter.
 - **Choice of summary provider** - OpenAI, Google Gemini, or OpenRouter (OpenRouter also gives access to Anthropic and other Google models under one key).
@@ -52,7 +52,7 @@ This plugin is built around avoiding those failure modes specifically:
 3. Click the microphone icon in the ribbon, or run **AI Transcribe and Summary: Start recording** from the command palette.
 4. When you're done, stop the recording. The audio is saved and transcribed automatically; if summary generation is enabled, the summary lands at your cursor if you have a note open, or in a new note otherwise.
 
-To process an audio file you already have in your vault, right-click it and choose **Transcribe & summarize** (or run **AI Transcribe and Summary: Transcribe & summarize active file** from the command palette if it's already open). To summarize a note's text directly, without any audio, right-click the note and choose **Summarize note**, or run **AI Transcribe and Summary: Summarize note** from the command palette with that note active.
+To process an audio or video file you already have in your vault, right-click it and choose **Transcribe & summarize** (or run **AI Transcribe and Summary: Transcribe & summarize active file** from the command palette if it's already open). To summarize a note's text directly, without media, right-click the note and choose **Summarize note**, or run **AI Transcribe and Summary: Summarize note** from the command palette with that note active.
 
 If a job is taking too long or you started it by mistake, run **AI Transcribe and Summary: Stop transcription/summary** to cancel it - anything already saved (raw audio, or a transcript from a completed step) stays put.
 

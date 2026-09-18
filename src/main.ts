@@ -3,7 +3,8 @@ import { AudioRecorder, isRecordingSilent, LEVEL_BAND_COUNT, RecordingResult } f
 import {
 	AudioSource,
 	formatTimestampForFilename,
-	isAudioFile,
+	isSupportedMediaFile,
+	isVideoFile,
 	logDebug,
 	needsTranscription,
 	RequestAbortedError,
@@ -30,6 +31,13 @@ const EXTENSION_MIME_TYPES: Record<string, string> = {
 	mp3: "audio/mpeg",
 	wav: "audio/wav",
 	m4a: "audio/mp4",
+	mp4: "video/mp4",
+	mov: "video/quicktime",
+	m4v: "video/x-m4v",
+	mkv: "video/x-matroska",
+	avi: "video/x-msvideo",
+	mpg: "video/mpeg",
+	mpeg: "video/mpeg",
 };
 
 function mimeTypeForExtension(extension: string): string {
@@ -296,7 +304,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			name: "Transcribe & summarize active file",
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
-				if (!file || !isAudioFile(file)) return false;
+				if (!file || !isSupportedMediaFile(file)) return false;
 				if (!checking) void this.transcribeAndSummarizeFile(file);
 				return true;
 			},
@@ -339,7 +347,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	private addFileMenuItems(menu: Pick<Menu, "addItem">, file: TFile) {
-		if (isAudioFile(file)) {
+		if (isSupportedMediaFile(file)) {
 			menu.addItem((item) =>
 				item
 					.setTitle("Transcribe & summarize")
@@ -414,7 +422,13 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			this.reportPipelineError("transcribe & summarize", error);
 			return;
 		}
-		await this.runPipelineWithSilenceCheck({ blob, mimeType: blob.type, baseName: file.basename, audioFile: file });
+		await this.runPipelineWithSilenceCheck({
+			blob,
+			mimeType: blob.type,
+			baseName: file.basename,
+			audioFile: file,
+			extractAudio: isVideoFile(file),
+		});
 	}
 
 	/** Logs and surfaces a pipeline failure - a user-initiated stop gets a neutral Notice instead of the usual red "failed" one. */
@@ -733,6 +747,13 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		// clip - when nothing downstream (transcript, cleanup, summary) needs transcription at all,
 		// there's no such call to protect, so skip straight through.
 		if (!needsTranscription(this.settings)) {
+			await this.runPipeline(source);
+			return;
+		}
+
+		// Video is always decoded by the transcription provider and emitted as WAV chunks.
+		// Decoding it here too just to check silence would do the most memory-intensive work twice.
+		if (source.extractAudio) {
 			await this.runPipeline(source);
 			return;
 		}

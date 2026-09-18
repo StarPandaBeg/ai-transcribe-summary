@@ -17,6 +17,8 @@ export function formatTimestampForFilename(date: Date): string {
 export interface AudioSource {
 	blob: Blob;
 	mimeType: string;
+	/** True for video containers, which must be decoded locally before their audio reaches Whisper. */
+	extractAudio?: boolean;
 	/** Base filename (no extension) used for the output note when there's no active note to insert into. */
 	baseName: string;
 	/** The saved/source audio file in the vault, when one exists - used to insert a link to it alongside the transcript. Undefined when saveAudioFile is off (live recording) or never applicable. */
@@ -135,6 +137,7 @@ export async function runTranscribeAndSummarizePipeline(
 		mimeType: source.mimeType,
 		vocabularyHints: settings.vocabularyHints,
 		language: settings.transcriptionLanguage,
+		extractAudio: source.extractAudio,
 		onProgress,
 		signal,
 	});
@@ -461,4 +464,12 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 
 export function isAudioFile(file: TFile): boolean {
 	return ["webm", "ogg", "mp3", "wav", "m4a"].includes(file.extension.toLowerCase());
+}
+
+export function isVideoFile(file: TFile): boolean {
+	return ["mp4", "mov", "m4v", "mkv", "avi", "mpg", "mpeg"].includes(file.extension.toLowerCase());
+}
+
+export function isSupportedMediaFile(file: TFile): boolean {
+	return isAudioFile(file) || isVideoFile(file);
 }
