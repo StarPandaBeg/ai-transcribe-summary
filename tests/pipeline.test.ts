@@ -13,6 +13,8 @@ vi.mock("../src/providers/map-reduce-summarizer", () => ({}));
 
 const {
 	applyFileNameTemplate,
+	buildSummaryFrontmatter,
+	buildSummaryLinkProperties,
 	buildTimestampedTranscriptMarkdown,
 	buildTranscriptContent,
 	buildTranscriptJson,
@@ -32,6 +34,34 @@ describe("summary source media links", () => {
 		expect(formatMediaLink("[[call.mp4]]", "embed")).toBe("![[call.mp4]]");
 		expect(formatMediaLink("[[call.mp4]]", "link")).toBe("[[call.mp4]]");
 		expect(formatMediaLink("[[call.mp4]]", "none")).toBe("");
+	});
+
+	it("builds link properties for video and its saved transcript", () => {
+		const video = { path: "Media/000.mp4", extension: "mp4" } as import("obsidian").TFile;
+		expect(buildSummaryLinkProperties(video, "Transcripts/000.json")).toEqual({
+			video: "[[Media/000.mp4]]",
+			transcript: "[[Transcripts/000.json]]",
+		});
+		expect(buildSummaryFrontmatter(video, "Transcripts/000.json")).toBe(
+			'---\nvideo: "[[Media/000.mp4]]"\ntranscript: "[[Transcripts/000.json]]"\n---\n\n'
+		);
+	});
+
+	it("builds link properties for root-level media and transcript files", () => {
+		const video = { path: "000.mp4", extension: "mp4" } as import("obsidian").TFile;
+		expect(buildSummaryLinkProperties(video, "000.json")).toEqual({
+			video: "[[000.mp4]]",
+			transcript: "[[000.json]]",
+		});
+		expect(buildSummaryFrontmatter(video, "000.json")).toBe(
+			'---\nvideo: "[[000.mp4]]"\ntranscript: "[[000.json]]"\n---\n\n'
+		);
+	});
+
+	it("uses an audio property for audio sources and omits missing links", () => {
+		const audio = { path: "Media/call.m4a", extension: "m4a" } as import("obsidian").TFile;
+		expect(buildSummaryLinkProperties(audio, undefined)).toEqual({ audio: "[[Media/call.m4a]]" });
+		expect(buildSummaryFrontmatter(undefined, undefined)).toBe("");
 	});
 });
 

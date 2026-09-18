@@ -157,12 +157,11 @@ export async function runTranscribeAndSummarizePipeline(
 	// Tracks whether the transcript file write below actually completed - the rescue
 	// path in the catch block uses this (rather than re-deriving it from settings) so it isn't
 	// skipped when a failure happens before that write runs, e.g. during cleanup.
-	let transcriptWritten = false;
+	let transcriptPath: string | undefined;
 	try {
 		if (settings.transcribeAudio) {
 			onProgress({ status: t("Saving transcript") });
-			await writeTranscriptFile(app, settings, source.baseName, transcription.text, transcription.segments, source.audioFile);
-			transcriptWritten = true;
+			transcriptPath = await writeTranscriptFile(app, settings, source.baseName, transcription.text, transcription.segments, source.audioFile);
 		}
 
 		if (!settings.generateSummary) {
@@ -219,12 +218,14 @@ export async function runTranscribeAndSummarizePipeline(
 				? buildMediaLinkMarkdown(app, source.audioFile, stillActiveView.file?.path ?? "", settings.summaryMediaLinkMode)
 				: "";
 			writeIntoActiveNote(stillActiveView, `${mediaLinkMarkdown}${summaryMarkdown}`);
+			await stillActiveView.save();
+			await writeSummaryLinkProperties(app, stillActiveView, source.audioFile, transcriptPath);
 		} else {
 			if (settings.summaryPlacement === "active-note" && activeView) {
 				const outputFolder = resolveResultFolder(settings.summaryFolder, source.audioFile, settings.saveResultsNextToSource) || t("the vault root");
 				new Notice(t('Couldn\'t detect the note to insert into - creating a new file in "{folder}" instead.', { folder: outputFolder }));
 			}
-			await writeIntoNewNote(app, settings, source.baseName, summaryMarkdown, source.audioFile);
+			await writeIntoNewNote(app, settings, source.baseName, summaryMarkdown, source.audioFile, transcriptPath);
 		}
 
 		new Notice(t('Summary ready for "{name}".', { name: source.baseName }));
@@ -234,7 +235,7 @@ export async function runTranscribeAndSummarizePipeline(
 		logDebug(cancelled ? "pipeline cancelled after transcription, saving raw transcript" : "pipeline failed after transcription, saving raw transcript", error);
 		// If the transcript was already written above before the failure, it's
 		// already safe - don't also write a rescue copy alongside it.
-		const rescuePath = transcriptWritten ? undefined : await tryWriteRescueTranscript(app, settings, source, transcription.text, transcription.segments);
+		const rescuePath = transcriptPath ? undefined : await tryWriteRescueTranscript(app, settings, source, transcription.text, transcription.segments);
 
 		if (cancelled) {
 			throw new RequestAbortedError(rescuePath ? t('Stopped. The transcript so far was saved to "{path}".', { path: rescuePath }) : t("Stopped."));
@@ -374,6 +375,22 @@ export function formatMediaLink(link: string, mode: SummaryMediaLinkMode): strin
 	return mode === "embed" ? `!${link}` : link;
 }
 
+type SummaryMediaFile = Pick<TFile, "path" | "extension">;
+
+export function buildSummaryLinkProperties(mediaFile: SummaryMediaFile | undefined, transcriptPath: string | undefined): Record<string, string> {
+	const properties: Record<string, string> = {};
+	if (mediaFile) properties[isVideoFile(mediaFile) ? "video" : "audio"] = `[[${mediaFile.path}]]`;
+	if (transcriptPath) properties.transcript = `[[${transcriptPath}]]`;
+	return properties;
+}
+
+export function buildSummaryFrontmatter(mediaFile: SummaryMediaFile | undefined, transcriptPath: string | undefined): string {
+	const properties = Object.entries(buildSummaryLinkProperties(mediaFile, transcriptPath));
+	if (properties.length === 0) return "";
+	const yaml = properties.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n");
+	return `---\n${yaml}\n---\n\n`;
+}
+
 /** `sourcePath` must be the final note path so relative Markdown links remain correct. */
 function buildMediaLinkMarkdown(app: App, mediaFile: TFile, sourcePath: string, mode: SummaryMediaLinkMode): string {
 	if (mode === "none") return "";
@@ -386,19 +403,40 @@ function writeIntoActiveNote(view: MarkdownView, summaryMarkdown: string): void 
 	logDebug("summary inserted into active note", { path: view.file?.path ?? null });
 }
 
+async function writeSummaryLinkProperties(
+	app: App,
+	view: MarkdownView,
+	mediaFile: TFile | undefined,
+	transcriptPath: string | undefined
+): Promise<void> {
+	if (!view.file) return;
+	const properties = buildSummaryLinkProperties(mediaFile, transcriptPath);
+	if (Object.keys(properties).length === 0) return;
+	await app.fileManager.processFrontMatter(view.file, (frontmatter) => {
+		for (const [key, value] of Object.entries(properties)) {
+			const existing = frontmatter[key];
+			if (existing === undefined || existing === null) frontmatter[key] = value;
+			else if (Array.isArray(existing) && !existing.includes(value)) existing.push(value);
+			else if (typeof existing === "string" && existing !== value) frontmatter[key] = [existing, value];
+		}
+	});
+}
+
 async function writeIntoNewNote(
 	app: App,
 	settings: AiTranscribeSummarySettings,
 	baseName: string,
 	summaryMarkdown: string,
-	audioFile: TFile | undefined
+	audioFile: TFile | undefined,
+	transcriptPath: string | undefined
 ): Promise<string> {
 	const folderPath = resolveResultFolder(settings.summaryFolder, audioFile, settings.saveResultsNextToSource);
 	await ensureFolder(app, folderPath);
 
 	const notePath = resolveNonCollidingPath(app, folderPath, applyFileNameTemplate(settings.summaryFileNameTemplate, baseName));
 	const mediaLinkMarkdown = audioFile ? buildMediaLinkMarkdown(app, audioFile, notePath, settings.summaryMediaLinkMode) : "";
-	await app.vault.create(notePath, `${mediaLinkMarkdown}${summaryMarkdown}`);
+	const frontmatter = buildSummaryFrontmatter(audioFile, transcriptPath);
+	await app.vault.create(notePath, `${frontmatter}${mediaLinkMarkdown}${summaryMarkdown}`);
 	logDebug("summary written to new note", { path: notePath });
 	return notePath;
 }
@@ -467,11 +505,11 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	}
 }
 
-export function isAudioFile(file: TFile): boolean {
+export function isAudioFile(file: Pick<TFile, "extension">): boolean {
 	return ["webm", "ogg", "mp3", "wav", "m4a"].includes(file.extension.toLowerCase());
 }
 
-export function isVideoFile(file: TFile): boolean {
+export function isVideoFile(file: Pick<TFile, "extension">): boolean {
 	return ["mp4", "mov", "m4v", "mkv", "avi", "mpg", "mpeg"].includes(file.extension.toLowerCase());
 }
 

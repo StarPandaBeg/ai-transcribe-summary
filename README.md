@@ -42,6 +42,7 @@ This plugin is built around avoiding those failure modes specifically:
 - **Optional transcript cleanup pass** - an LLM pass that removes filler words, false starts, and grammar mistakes before summarization. Saved transcripts keep the provider's original output so timestamped formats remain aligned with the audio.
 - **Custom vocabulary hints** - feed the transcription provider a list of names, jargon, or project terms to reduce misrecognition.
 - **Flexible transcript output** - save the original plain transcript note, timestamped Markdown, or structured JSON segments (`start`, `end`, `text`, and `speaker`).
+- **Linked summary metadata** - generated summaries add `audio` or `video` and `transcript` properties with Obsidian wikilinks, keeping source media, transcripts, and notes connected in the graph.
 - **Silence auto-stop and max-duration backstop** - stop worrying about leaving a recording running after everyone's left.
 - **Silent-recording warning** - if a recording or existing audio file has no detectable signal, you're warned before it's sent off for transcription, with the option to proceed anyway.
 - **Cancel anytime** - stop an in-progress transcription or summary from the command palette; the audio you already have stays saved either way.
