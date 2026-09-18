@@ -102,7 +102,7 @@ All three providers meter usage per request; check their pricing/quota pages ([O
 | Custom vocabulary | Names/jargon hints passed to the transcription provider |
 | Recording | Microphone selection, audio bitrate, silence auto-stop, max duration, start/stop confirmation |
 | Output placement | Where the raw audio, transcript JSON, and summary are saved, and whether the summary goes to the active note or a dedicated file |
-| Output files | Save transcript JSON and summary notes beside their source media and customize both file names with the `{name}` token |
+| Output files | Save transcript JSON and summary notes beside their source media, customize both file names with the `{name}` token, and embed, link, or omit source media in summaries |
 
 Every prompt (summary and cleanup) is fully editable, with a one-click reset back to the default.
 

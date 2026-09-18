@@ -62,6 +62,7 @@ export const DEFAULT_SUMMARY_FILE_NAME_TEMPLATE = "{name}-summary";
 export type TranscriptionProviderId = "openai" | "openrouter";
 
 export type SummaryPlacement = "active-note" | "dedicated-file";
+export type SummaryMediaLinkMode = "embed" | "link" | "none";
 
 /** Recording bitrate in kbps. Kept as a closed set - MediaRecorder accepts arbitrary values, but only these are exposed. */
 export type AudioBitrateKbps = 32 | 64 | 128;
@@ -186,6 +187,7 @@ export interface AiTranscribeSummarySettings {
 	summaryPlacement: SummaryPlacement;
 	summaryFolder: string;
 	summaryFileNameTemplate: string;
+	summaryMediaLinkMode: SummaryMediaLinkMode;
 	/** When a source media file exists in the vault, new transcript and summary files use its folder instead of their configured folders. */
 	saveResultsNextToSource: boolean;
 }
@@ -238,6 +240,7 @@ export const DEFAULT_SETTINGS: AiTranscribeSummarySettings = {
 	summaryPlacement: "active-note",
 	summaryFolder: "_meetings",
 	summaryFileNameTemplate: DEFAULT_SUMMARY_FILE_NAME_TEMPLATE,
+	summaryMediaLinkMode: "embed",
 	saveResultsNextToSource: false,
 };
 
@@ -438,6 +441,8 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return settings.summaryFolder;
 			case "summaryFileNameTemplate":
 				return settings.summaryFileNameTemplate;
+			case "summaryMediaLinkMode":
+				return settings.summaryMediaLinkMode;
 			case "saveResultsNextToSource":
 				return settings.saveResultsNextToSource;
 			case "summaryPlacement":
@@ -571,6 +576,9 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				break;
 			case "summaryFileNameTemplate":
 				settings.summaryFileNameTemplate = (value as string).trim() || DEFAULT_SUMMARY_FILE_NAME_TEMPLATE;
+				break;
+			case "summaryMediaLinkMode":
+				settings.summaryMediaLinkMode = value as SummaryMediaLinkMode;
 				break;
 			case "saveResultsNextToSource":
 				settings.saveResultsNextToSource = value as boolean;
@@ -1087,6 +1095,20 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 						key: "summaryFileNameTemplate",
 						placeholder: DEFAULT_SUMMARY_FILE_NAME_TEMPLATE,
 						validate: (value) => validateFileNameTemplate(value, ".md"),
+					},
+				},
+				{
+					name: "Source media in summary",
+					desc: "Choose whether summaries include an embedded player, a link to the source audio or video, or no source reference.",
+					visible: () => this.plugin.settings.generateSummary,
+					control: {
+						type: "dropdown",
+						key: "summaryMediaLinkMode",
+						options: {
+							embed: "Embed player",
+							link: "Link only",
+							none: "Don't include",
+						},
 					},
 				},
 			],

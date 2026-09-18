@@ -5,7 +5,7 @@ import { createSummaryProvider, createTranscriptionProvider, resolveSummaryApiKe
 import { summarizeLongTranscript } from "./providers/map-reduce-summarizer";
 import { RequestAbortedError } from "./providers/request-timeout";
 import type { TranscriptionSegment } from "./providers/transcription";
-import { AiTranscribeSummarySettings, transcriptionKeyReuseTarget } from "./settings";
+import { AiTranscribeSummarySettings, SummaryMediaLinkMode, transcriptionKeyReuseTarget } from "./settings";
 
 export { RequestAbortedError };
 
@@ -210,8 +210,10 @@ export async function runTranscribeAndSummarizePipeline(
 		const stillActiveView =
 			settings.summaryPlacement === "active-note" && activeView && app.workspace.getActiveViewOfType(MarkdownView) === activeView ? activeView : undefined;
 		if (stillActiveView) {
-			const audioLinkMarkdown = source.audioFile ? buildAudioLinkMarkdown(app, source.audioFile, stillActiveView.file?.path ?? "") : "";
-			writeIntoActiveNote(stillActiveView, `${audioLinkMarkdown}${summaryMarkdown}`);
+			const mediaLinkMarkdown = source.audioFile
+				? buildMediaLinkMarkdown(app, source.audioFile, stillActiveView.file?.path ?? "", settings.summaryMediaLinkMode)
+				: "";
+			writeIntoActiveNote(stillActiveView, `${mediaLinkMarkdown}${summaryMarkdown}`);
 		} else {
 			if (settings.summaryPlacement === "active-note" && activeView) {
 				const outputFolder = resolveResultFolder(settings.summaryFolder, source.audioFile, settings.saveResultsNextToSource) || "the vault root";
@@ -331,17 +333,16 @@ export function buildTranscriptJson(segments: TranscriptionSegment[]): string {
 	return `${JSON.stringify({ segments }, null, 2)}\n`;
 }
 
-/**
- * Embedded link to the saved/source audio file, placed just above the
- * transcript/summary - `!` forces an embed (renders as a playable audio
- * widget) regardless of generateMarkdownLink's own wikilink-vs-markdown
- * choice, which just follows the vault's "Use [[Wikilinks]]" setting.
- * `sourcePath` is the final path of the note the link is written into, which
- * keeps relative Markdown links correct when output follows its source audio.
- */
-function buildAudioLinkMarkdown(app: App, audioFile: TFile, sourcePath: string): string {
-	const link = app.fileManager.generateMarkdownLink(audioFile, sourcePath);
-	return `!${link}\n\n`;
+export function formatMediaLink(link: string, mode: SummaryMediaLinkMode): string {
+	if (mode === "none") return "";
+	return mode === "embed" ? `!${link}` : link;
+}
+
+/** `sourcePath` must be the final note path so relative Markdown links remain correct. */
+function buildMediaLinkMarkdown(app: App, mediaFile: TFile, sourcePath: string, mode: SummaryMediaLinkMode): string {
+	if (mode === "none") return "";
+	const link = app.fileManager.generateMarkdownLink(mediaFile, sourcePath);
+	return `${formatMediaLink(link, mode)}\n\n`;
 }
 
 function writeIntoActiveNote(view: MarkdownView, summaryMarkdown: string): void {
@@ -360,8 +361,8 @@ async function writeIntoNewNote(
 	await ensureFolder(app, folderPath);
 
 	const notePath = resolveNonCollidingPath(app, folderPath, applyFileNameTemplate(settings.summaryFileNameTemplate, baseName));
-	const audioLinkMarkdown = audioFile ? buildAudioLinkMarkdown(app, audioFile, notePath) : "";
-	await app.vault.create(notePath, `${audioLinkMarkdown}${summaryMarkdown}`);
+	const mediaLinkMarkdown = audioFile ? buildMediaLinkMarkdown(app, audioFile, notePath, settings.summaryMediaLinkMode) : "";
+	await app.vault.create(notePath, `${mediaLinkMarkdown}${summaryMarkdown}`);
 	logDebug("summary written to new note", { path: notePath });
 	return notePath;
 }

@@ -10,8 +10,16 @@ vi.mock("../src/settings", () => ({}));
 vi.mock("../src/providers/factory", () => ({}));
 vi.mock("../src/providers/map-reduce-summarizer", () => ({}));
 
-const { applyFileNameTemplate, buildTranscriptJson, isAudioFile, isSupportedMediaFile, isVideoFile, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } =
+const { applyFileNameTemplate, buildTranscriptJson, formatMediaLink, isAudioFile, isSupportedMediaFile, isVideoFile, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } =
 	await import("../src/pipeline");
+
+describe("summary source media links", () => {
+	it("formats embedded players, ordinary links, and omitted references", () => {
+		expect(formatMediaLink("[[call.mp4]]", "embed")).toBe("![[call.mp4]]");
+		expect(formatMediaLink("[[call.mp4]]", "link")).toBe("[[call.mp4]]");
+		expect(formatMediaLink("[[call.mp4]]", "none")).toBe("");
+	});
+});
 
 /** Minimal fake App - only the vault.getAbstractFileByPath lookup that resolveNonCollidingPath(WithExtension) reads. `existingPaths` mimics files already present in the vault. */
 function fakeApp(existingPaths: string[]) {
