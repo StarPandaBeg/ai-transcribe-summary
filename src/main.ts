@@ -12,6 +12,8 @@ import {
 	runTranscribeAndSummarizePipeline,
 } from "./pipeline";
 import { AiTranscribeSummarySettingTab, AiTranscribeSummarySettings, DEFAULT_SETTINGS } from "./settings";
+import { TaskCenterView, TASK_CENTER_VIEW_TYPE } from "./task-center-view";
+import { TaskTracker } from "./task-tracker";
 
 /** audio/webm -> webm, audio/ogg;codecs=opus -> ogg, etc. */
 function extensionForMimeType(mimeType: string): string {
@@ -225,15 +227,33 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private nextPipelineJobId = 0;
 	private pipelineAnimationIntervalId: number | undefined;
 	private pipelineAnimationFrame = 0;
+	private taskTracker = new TaskTracker();
 
 	async onload() {
 		await this.loadSettings();
+		this.registerView(TASK_CENTER_VIEW_TYPE, (leaf) =>
+			new TaskCenterView(leaf, this.taskTracker, {
+				cancelTask: (id) => this.stopPipelineJob(id),
+				stopRecording: () => this.requestStopRecording(),
+			})
+		);
 
 		this.statusBarItem = this.addStatusBarItem();
 		this.statusBarDotEl = this.statusBarItem.createSpan({ cls: "ai-transcribe-summary-status-dot" });
 		this.statusBarDotEl.hide();
 		this.statusBarTextEl = this.statusBarItem.createSpan();
+		this.statusBarItem.addEventListener("click", () => void this.openTaskCenter());
+		this.statusBarItem.addClass("ai-transcribe-summary-status");
+		this.statusBarItem.setAttribute("aria-label", "Open AI tasks");
 		this.statusBarItem.hide();
+
+		this.addRibbonIcon("list-checks", "Open AI tasks", () => void this.openTaskCenter());
+
+		this.addCommand({
+			id: "open-task-center",
+			name: "Open task center",
+			callback: () => void this.openTaskCenter(),
+		});
 
 		this.ribbonIconEl = this.addRibbonIcon("mic", "Start meeting recording", () => {
 			if (this.transitioning) return;
@@ -376,7 +396,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	private async summarizeText(editor: Editor, text: string, replaceSelection: boolean, fileLabel: string): Promise<void> {
-		const { jobId, signal } = this.beginPipelineJob();
+		const { jobId, signal } = this.beginPipelineJob(`Summarize “${fileLabel}”`);
 		try {
 			await runSummarizeTextPipeline(this.settings, { text, editor, replaceSelection, fileLabel }, { onProgress: (status) => this.showPipelineProgress(jobId, status), signal });
 		} catch (error) {
@@ -409,23 +429,41 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	/** Registers a new pipeline job with its own AbortController and returns its id/signal, to be passed to showPipelineProgress/endPipelineJob for the lifetime of that job. */
-	private beginPipelineJob(): { jobId: number; signal: AbortSignal } {
+	private beginPipelineJob(title: string): { jobId: number; signal: AbortSignal } {
 		const jobId = this.nextPipelineJobId++;
 		const controller = new AbortController();
 		this.pipelineJobControllers.set(jobId, controller);
+		this.taskTracker.start({
+			id: `pipeline-${jobId}`,
+			kind: "pipeline",
+			title,
+			status: "Starting",
+			startedAt: Date.now(),
+			canCancel: true,
+		});
 		return { jobId, signal: controller.signal };
 	}
 
 	/** Aborts every currently-running pipeline job - triggered by the "Stop transcription/summary" command since the status bar/command palette don't distinguish which job is which. */
 	private stopPipelineJobs() {
-		for (const controller of this.pipelineJobControllers.values()) {
+		for (const [jobId, controller] of this.pipelineJobControllers) {
 			controller.abort();
+			this.taskTracker.update(`pipeline-${jobId}`, { status: "Stopping", canCancel: false });
 		}
 		new Notice("Stopping...");
 	}
 
+	private stopPipelineJob(taskId: string) {
+		const jobId = Number(taskId.replace(/^pipeline-/, ""));
+		const controller = this.pipelineJobControllers.get(jobId);
+		if (!controller) return;
+		controller.abort();
+		this.taskTracker.update(taskId, { status: "Stopping", canCancel: false });
+	}
+
 	private showPipelineProgress(jobId: number, status: string) {
 		this.activePipelineJobs.set(jobId, status);
+		this.taskTracker.update(`pipeline-${jobId}`, { status });
 		this.statusBarItem.show();
 		this.statusBarDotEl.hide();
 		this.renderPipelineProgress();
@@ -454,6 +492,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private endPipelineJob(jobId: number) {
 		this.activePipelineJobs.delete(jobId);
 		this.pipelineJobControllers.delete(jobId);
+		this.taskTracker.finish(`pipeline-${jobId}`);
 		if (this.activePipelineJobs.size > 0) {
 			this.renderPipelineProgress();
 			return;
@@ -555,6 +594,14 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.state = "recording";
 		this.accumulatedMs = 0;
 		this.segmentStartedAt = Date.now();
+		this.taskTracker.start({
+			id: "recording",
+			kind: "recording",
+			title: "Meeting recording",
+			status: "Recording",
+			startedAt: this.segmentStartedAt,
+			canCancel: true,
+		});
 
 		setIcon(this.ribbonIconEl, "audio-lines");
 		this.ribbonIconEl.addClass("is-active");
@@ -595,6 +642,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.recorder.pause();
 		this.accumulatedMs += Date.now() - this.segmentStartedAt;
 		this.state = "paused";
+		this.taskTracker.update("recording", { status: "Paused" });
 		this.ribbonIconEl.addClass("is-paused");
 		this.resetRibbonLevel();
 		this.stopTimer();
@@ -605,6 +653,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.recorder.resume();
 		this.segmentStartedAt = Date.now();
 		this.state = "recording";
+		this.taskTracker.update("recording", { status: "Recording" });
 		this.ribbonIconEl.removeClass("is-paused");
 		this.updateStatusBar();
 		this.startTimer();
@@ -613,6 +662,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private async stopRecording() {
 		this.transitioning = true;
 		this.stopTimer();
+		this.taskTracker.update("recording", { status: "Finishing recording", canCancel: false });
 
 		let result: RecordingResult;
 		try {
@@ -628,6 +678,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			this.ribbonIconEl.setAttribute("aria-label", "Start meeting recording");
 			this.resetRibbonLevel();
 			this.statusBarItem.hide();
+			this.taskTracker.finish("recording");
 			return;
 		}
 
@@ -640,6 +691,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		this.resetRibbonLevel();
 
 		if (result.durationMs < MIN_RECORDING_MS) {
+			this.taskTracker.finish("recording");
 			new Notice("Recording was too short to transcribe - nothing was saved.");
 			return;
 		}
@@ -647,8 +699,10 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		// Raw audio is always preserved regardless of what transcription/summary do downstream.
 		let savedFile: TFile | undefined;
 		if (this.settings.saveAudioFile) {
+			this.taskTracker.update("recording", { status: "Saving audio" });
 			savedFile = await this.saveRecording(result);
 		}
+		this.taskTracker.finish("recording");
 
 		if (result.durationMs > LONG_RECORDING_WARNING_MS) {
 			new Notice(
@@ -711,7 +765,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	private async runPipeline(source: AudioSource) {
-		const { jobId, signal } = this.beginPipelineJob();
+		const { jobId, signal } = this.beginPipelineJob(`Process “${source.baseName}”`);
 		try {
 			await runTranscribeAndSummarizePipeline(this.app, this.settings, source, {
 				targetView: this.lastMarkdownView,
@@ -796,6 +850,15 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		if (this.state === "idle" || this.transitioning) return;
 		new Notice(`Recording auto-stopped: reached ${reason}.`);
 		void this.stopRecording();
+	}
+
+	private async openTaskCenter(): Promise<void> {
+		let leaf = this.app.workspace.getLeavesOfType(TASK_CENTER_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+			await leaf.setViewState({ type: TASK_CENTER_VIEW_TYPE, active: true });
+		}
+		await this.app.workspace.revealLeaf(leaf);
 	}
 
 	async loadSettings() {

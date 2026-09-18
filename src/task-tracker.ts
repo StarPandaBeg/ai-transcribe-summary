@@ -1,0 +1,50 @@
+export type TaskKind = "recording" | "pipeline";
+
+export interface TrackedTask {
+	id: string;
+	kind: TaskKind;
+	title: string;
+	status: string;
+	startedAt: number;
+	canCancel: boolean;
+}
+
+export type TaskTrackerListener = (tasks: readonly TrackedTask[]) => void;
+
+/** Keeps transient work state outside the Obsidian view so closing and reopening the pane never loses active tasks. */
+export class TaskTracker {
+	private tasks = new Map<string, TrackedTask>();
+	private listeners = new Set<TaskTrackerListener>();
+
+	getTasks(): readonly TrackedTask[] {
+		return [...this.tasks.values()];
+	}
+
+	start(task: TrackedTask): void {
+		this.tasks.set(task.id, task);
+		this.notify();
+	}
+
+	update(id: string, changes: Partial<Pick<TrackedTask, "status" | "title" | "canCancel">>): void {
+		const task = this.tasks.get(id);
+		if (!task) return;
+		this.tasks.set(id, { ...task, ...changes });
+		this.notify();
+	}
+
+	finish(id: string): void {
+		if (!this.tasks.delete(id)) return;
+		this.notify();
+	}
+
+	subscribe(listener: TaskTrackerListener): () => void {
+		this.listeners.add(listener);
+		listener(this.getTasks());
+		return () => this.listeners.delete(listener);
+	}
+
+	private notify(): void {
+		const tasks = this.getTasks();
+		for (const listener of this.listeners) listener(tasks);
+	}
+}
