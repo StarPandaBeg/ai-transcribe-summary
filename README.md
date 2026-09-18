@@ -2,6 +2,8 @@
 
 An Obsidian plugin for recording meetings, transcribing them reliably, and turning the transcript into a structured summary - without losing audio to size limits, silence, or a bad API response.
 
+This fork is maintained and substantially extended by [StarPanda](https://github.com/StarPandaBeg), based on the original plugin by [Utkarsh Shigihalli](https://github.com/onlyutkarsh).
+
 Record directly in Obsidian, or right-click any existing audio file in your vault to transcribe it. Either way you get:
 
 - The **raw audio**, always saved first, before anything else is attempted
@@ -92,7 +94,7 @@ All three providers meter usage per request; check their pricing/quota pages ([O
 2. Create a folder named `ai-transcribe-summary` inside your vault's `.obsidian/plugins/` directory and place the three files there.
 3. Reload Obsidian and enable the plugin under **Settings → Community Plugins**.
 
-**Using [BRAT](https://github.com/TfTHacker/obsidian42-brat):** add this repository (`onlyutkarsh/ai-transcribe-summary`) as a beta plugin.
+**Using [BRAT](https://github.com/TfTHacker/obsidian42-brat):** add this repository (`StarPandaBeg/ai-transcribe-summary`) as a beta plugin.
 
 ## Settings overview
 
@@ -130,6 +132,11 @@ Every prompt (summary and cleanup) is fully editable, with a one-click reset bac
 ## Development
 
 Built with the help of AI coding assistants.
+
+## Authors
+
+- [Utkarsh Shigihalli](https://github.com/onlyutkarsh) — original creator.
+- [StarPanda](https://github.com/StarPandaBeg) — fork maintainer and author of major additions, including video transcription, configurable output formats and placement, the task center with detailed progress, and Russian localization.
 
 ## License
 

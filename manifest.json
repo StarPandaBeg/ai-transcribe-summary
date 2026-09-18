@@ -4,8 +4,8 @@
 	"version": "1.4.3",
 	"minAppVersion": "1.13.0",
 	"description": "Record meetings, transcribe reliably past size/silence failure modes, and produce a structured summary alongside the full transcript.",
-	"author": "Utkarsh",
-	"authorUrl": "https://github.com/onlyutkarsh",
+	"author": "Utkarsh & StarPanda",
+	"authorUrl": "https://github.com/StarPandaBeg",
 	"fundingUrl": "https://ko-fi.com/onlyutkarsh",
 	"isDesktopOnly": false
 }

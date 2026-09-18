@@ -13,7 +13,21 @@
 		"link:hotreload": "node scripts/install-hot-reload.mjs"
 	},
 	"keywords": [],
-	"author": "Utkarsh",
+	"author": "Utkarsh Shigihalli & StarPanda",
+	"contributors": [
+		{
+			"name": "StarPanda",
+			"url": "https://github.com/StarPandaBeg"
+		}
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/StarPandaBeg/ai-transcribe-summary.git"
+	},
+	"homepage": "https://github.com/StarPandaBeg/ai-transcribe-summary#readme",
+	"bugs": {
+		"url": "https://github.com/StarPandaBeg/ai-transcribe-summary/issues"
+	},
 	"license": "MIT",
 	"type": "module",
 	"devDependencies": {
