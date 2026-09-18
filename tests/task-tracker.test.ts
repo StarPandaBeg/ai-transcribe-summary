@@ -63,4 +63,36 @@ describe("TaskTracker", () => {
 
 		expect(goodListener).toHaveBeenCalled();
 	});
+
+	it("supports failing, retrying, and dismissing tasks", () => {
+		const tracker = new TaskTracker();
+		const retryAction = vi.fn();
+
+		tracker.start({ id: "job-1", kind: "pipeline", title: "Job 1", status: "Starting", startedAt: 1, canCancel: true });
+		tracker.fail("job-1", "Upload failed", "HTTP 500 error", retryAction);
+
+		const task = tracker.getTasks()[0];
+		expect(task.error).toBe("Upload failed");
+		expect(task.errorDetails).toBe("HTTP 500 error");
+		expect(task.canCancel).toBe(false);
+		expect(task.canRetry).toBe(true);
+		expect(task.progress).toBeUndefined();
+
+		task.retryAction?.();
+		expect(retryAction).toHaveBeenCalledTimes(1);
+
+		tracker.dismiss("job-1");
+		expect(tracker.getTasks()).toEqual([]);
+	});
+
+	it("clears failed tasks with clearFailed", () => {
+		const tracker = new TaskTracker();
+		tracker.start({ id: "active", kind: "pipeline", title: "Active", status: "Running", startedAt: 1, canCancel: true });
+		tracker.start({ id: "failed", kind: "pipeline", title: "Failed", status: "Starting", startedAt: 2, canCancel: true });
+		tracker.fail("failed", "Error");
+
+		expect(tracker.getTasks()).toHaveLength(2);
+		tracker.clearFailed();
+		expect(tracker.getTasks().map((t) => t.id)).toEqual(["active"]);
+	});
 });

@@ -23,3 +23,7 @@ export function setTestLanguage(value: string): void {
 export function requestUrl(): never {
 	throw new Error("requestUrl is not implemented in tests - mock it at the call site instead of hitting this stub.");
 }
+
+export function normalizePath(path: string): string {
+	return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+}

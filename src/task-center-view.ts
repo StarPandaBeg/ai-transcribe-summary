@@ -1,4 +1,4 @@
-import { ItemView, setIcon, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, setIcon, WorkspaceLeaf } from "obsidian";
 import { t } from "./i18n";
 import { TaskTracker, TrackedTask } from "./task-tracker";
 
@@ -7,6 +7,9 @@ export const TASK_CENTER_VIEW_TYPE = "ai-transcribe-summary-task-center";
 export interface TaskCenterActions {
 	cancelTask(id: string): void;
 	stopRecording(): void;
+	openErrorLog?(): void;
+	retryTask?(id: string): void;
+	dismissTask?(id: string): void;
 }
 
 function formatDuration(ms: number): string {
@@ -73,11 +76,11 @@ export class TaskCenterView extends ItemView {
 	}
 
 	private syncTimer(): void {
-		const hasTasks = this.tracker.getTasks().length > 0;
-		if (hasTasks && this.timerId === undefined) {
+		const hasActiveTasks = this.tracker.getTasks().some((task) => !task.error);
+		if (hasActiveTasks && this.timerId === undefined) {
 			const viewWindow = this.contentEl.ownerDocument.defaultView ?? window;
 			this.timerId = viewWindow.setInterval(() => this.render(), 1000);
-		} else if (!hasTasks) {
+		} else if (!hasActiveTasks) {
 			this.stopTimer();
 		}
 	}
@@ -103,6 +106,15 @@ export class TaskCenterView extends ItemView {
 			attr: { "aria-label": t("Active tasks: {count}", { count: tasks.length }) },
 		});
 
+		if (this.actions.openErrorLog) {
+			const errorLogBtn = header.createEl("button", {
+				cls: "clickable-icon ai-transcribe-summary-task-error-log-btn",
+				attr: { "aria-label": t("Open error log") },
+			});
+			setIcon(errorLogBtn, "alert-circle");
+			errorLogBtn.addEventListener("click", () => this.actions.openErrorLog?.());
+		}
+
 		if (tasks.length === 0) {
 			const empty = container.createDiv({ cls: "ai-transcribe-summary-task-empty" });
 			const icon = empty.createDiv({ cls: "ai-transcribe-summary-task-empty-icon" });
@@ -123,16 +135,32 @@ export class TaskCenterView extends ItemView {
 	}
 
 	private renderTask(list: HTMLElement, task: TrackedTask): void {
-		const card = list.createDiv({ cls: "ai-transcribe-summary-task-card" });
-		const icon = card.createDiv({ cls: `ai-transcribe-summary-task-icon is-${task.kind}` });
-		setIcon(icon, task.kind === "recording" ? "mic" : "sparkles");
+		const isError = Boolean(task.error);
+		const card = list.createDiv({ cls: `ai-transcribe-summary-task-card${isError ? " is-error" : ""}` });
+
+		const iconClass = isError ? "is-error" : `is-${task.kind}`;
+		const icon = card.createDiv({ cls: `ai-transcribe-summary-task-icon ${iconClass}` });
+		if (isError) {
+			setIcon(icon, "alert-triangle");
+		} else {
+			setIcon(icon, task.kind === "recording" ? "mic" : "sparkles");
+		}
 
 		const details = card.createDiv({ cls: "ai-transcribe-summary-task-details" });
 		details.createDiv({ cls: "ai-transcribe-summary-task-title", text: task.title });
-		const status = details.createDiv({ cls: "ai-transcribe-summary-task-status" });
-		if (!task.progress) status.createSpan({ cls: "ai-transcribe-summary-task-spinner", attr: { "aria-hidden": "true" } });
-		status.createSpan({ text: task.status });
-		if (task.progress) {
+
+		const status = details.createDiv({ cls: `ai-transcribe-summary-task-status${isError ? " is-error" : ""}` });
+		if (!task.progress && !isError) {
+			status.createSpan({ cls: "ai-transcribe-summary-task-spinner", attr: { "aria-hidden": "true" } });
+		}
+		status.createSpan({ text: isError ? t("Failed") : task.status });
+
+		if (isError && task.error) {
+			const errorBox = details.createDiv({ cls: "ai-transcribe-summary-task-error-box" });
+			errorBox.createSpan({ text: task.error });
+		}
+
+		if (task.progress && !isError) {
 			const percentage = Math.round((task.progress.completed / task.progress.total) * 100);
 			const progressHeader = details.createDiv({ cls: "ai-transcribe-summary-progress-header" });
 			const unit = t(task.progress.unit ?? "steps");
@@ -150,10 +178,46 @@ export class TaskCenterView extends ItemView {
 			});
 			progressBar.createDiv({ cls: "ai-transcribe-summary-progress-fill" }).style.setProperty("width", `${percentage}%`);
 		}
-		details.createDiv({ cls: "ai-transcribe-summary-task-elapsed", text: t("Elapsed {duration}", { duration: formatDuration(Date.now() - task.startedAt) }) });
 
-		if (task.canCancel) {
-			const button = card.createEl("button", {
+		const elapsedMs = (task.completedAt ?? Date.now()) - task.startedAt;
+		details.createDiv({ cls: "ai-transcribe-summary-task-elapsed", text: t("Elapsed {duration}", { duration: formatDuration(elapsedMs) }) });
+
+		const actionsContainer = card.createDiv({ cls: "ai-transcribe-summary-task-card-actions" });
+
+		if (isError) {
+			if (task.canRetry && task.retryAction) {
+				const retryBtn = actionsContainer.createEl("button", {
+					cls: "clickable-icon ai-transcribe-summary-task-action-btn",
+					attr: { "aria-label": t("Retry") },
+				});
+				setIcon(retryBtn, "rotate-cw");
+				retryBtn.addEventListener("click", () => {
+					this.tracker.update(task.id, { error: undefined, errorDetails: undefined, status: t("Starting") });
+					task.retryAction?.();
+				});
+			}
+
+			const copyBtn = actionsContainer.createEl("button", {
+				cls: "clickable-icon ai-transcribe-summary-task-action-btn",
+				attr: { "aria-label": t("Copy error") },
+			});
+			setIcon(copyBtn, "copy");
+			copyBtn.addEventListener("click", async () => {
+				const text = `${task.title}\n${task.error}${task.errorDetails ? `\n\n${task.errorDetails}` : ""}`;
+				await navigator.clipboard.writeText(text);
+				new Notice(t("Error copied to clipboard"));
+			});
+
+			const dismissBtn = actionsContainer.createEl("button", {
+				cls: "clickable-icon ai-transcribe-summary-task-action-btn",
+				attr: { "aria-label": t("Dismiss") },
+			});
+			setIcon(dismissBtn, "x");
+			dismissBtn.addEventListener("click", () => {
+				this.actions.dismissTask ? this.actions.dismissTask(task.id) : this.tracker.dismiss(task.id);
+			});
+		} else if (task.canCancel) {
+			const button = actionsContainer.createEl("button", {
 				cls: "clickable-icon ai-transcribe-summary-task-cancel",
 				attr: { "aria-label": t(task.kind === "recording" ? "Stop recording" : "Stop task") },
 			});

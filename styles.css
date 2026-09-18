@@ -248,3 +248,126 @@
 		transition: none;
 	}
 }
+
+.ai-transcribe-summary-task-card.is-error {
+	border-color: var(--color-red);
+	background: var(--background-modifier-error-hover, var(--background-primary-alt));
+}
+
+.ai-transcribe-summary-task-icon.is-error {
+	background: var(--color-red);
+	color: var(--text-on-accent);
+}
+
+.ai-transcribe-summary-task-status.is-error {
+	color: var(--color-red);
+	font-weight: var(--font-semibold);
+}
+
+.ai-transcribe-summary-task-error-box {
+	margin-top: var(--size-4-2);
+	padding: var(--size-4-2);
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-error, rgba(255, 0, 0, 0.08));
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	word-break: break-word;
+	user-select: text;
+}
+
+.ai-transcribe-summary-task-card-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+}
+
+.ai-transcribe-summary-task-action-btn {
+	color: var(--text-muted);
+}
+
+.ai-transcribe-summary-task-action-btn:hover {
+	color: var(--text-normal);
+}
+
+.ai-transcribe-summary-task-error-log-btn {
+	margin-left: auto;
+	color: var(--text-muted);
+}
+
+.ai-transcribe-summary-task-error-log-btn:hover {
+	color: var(--color-red);
+}
+
+.ai-transcribe-summary-error-modal-header {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-3);
+}
+
+.ai-transcribe-summary-error-modal-header h3 {
+	margin: 0;
+}
+
+.ai-transcribe-summary-error-modal-actions {
+	display: flex;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-4);
+}
+
+.ai-transcribe-summary-error-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+	max-height: 60vh;
+	overflow-y: auto;
+}
+
+.ai-transcribe-summary-error-item {
+	padding: var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--color-red);
+	border-radius: var(--radius-m);
+	background: var(--background-primary-alt);
+}
+
+.ai-transcribe-summary-error-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: var(--size-4-1);
+}
+
+.ai-transcribe-summary-error-meta {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.ai-transcribe-summary-error-source {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.ai-transcribe-summary-error-message {
+	font-size: var(--font-ui-small);
+	color: var(--color-red);
+	margin-bottom: var(--size-4-1);
+	user-select: text;
+}
+
+.ai-transcribe-summary-error-details {
+	font-size: var(--font-ui-smaller);
+	max-height: 120px;
+	overflow: auto;
+	margin: 0;
+	padding: var(--size-4-2);
+	background: var(--background-primary);
+	border-radius: var(--radius-s);
+	user-select: text;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+

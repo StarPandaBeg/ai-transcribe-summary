@@ -91,11 +91,43 @@ export function validateSummaryProviderConfig(settings: AiTranscribeSummarySetti
  *   transcription would ever be written, so transcription is skipped entirely and
  *   the recording is audio-only (targetView has no effect in that case).
  */
+export function hashString(input: string): string {
+	let hash = 2166136261;
+	for (let i = 0; i < input.length; i++) {
+		hash ^= input.charCodeAt(i);
+		hash = Math.imul(hash, 16777619);
+	}
+	return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/** Computes a deterministic cache key representing the source audio and transcription parameters. */
+export function computeTranscriptionCacheKey(source: AudioSource, settings: AiTranscribeSummarySettings): string {
+	const providerId = settings.transcriptionProvider;
+	const providerConfig = settings.providers[providerId];
+	const model = providerConfig?.model ?? "";
+	const lang = settings.transcriptionLanguage ?? "";
+	const hints = settings.vocabularyHints ?? "";
+	const maxMb = settings.whisperMaxFileSizeMb ?? 22;
+	const sourceIdentifier = source.filePath ?? source.audioFile?.path ?? source.baseName;
+	const sourceSize = source.audioFile?.stat?.size ?? source.blob.size;
+	const sourceMtime = source.audioFile?.stat?.mtime ?? 0;
+
+	const raw = `${sourceIdentifier}:${sourceSize}:${sourceMtime}:${providerId}:${model}:${lang}:${hints}:${maxMb}`;
+	const hash = hashString(raw);
+	const sanitized = source.baseName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 24);
+	return `${sanitized}-${hash}`;
+}
+
 export async function runTranscribeAndSummarizePipeline(
 	app: App,
 	settings: AiTranscribeSummarySettings,
 	source: AudioSource,
-	options: { targetView: MarkdownView | undefined; onProgress?: ProgressCallback; signal?: AbortSignal }
+	options: {
+		targetView: MarkdownView | undefined;
+		onProgress?: ProgressCallback;
+		signal?: AbortSignal;
+		chunkCache?: import("./audio/chunk-cache").ChunkCache;
+	}
 ): Promise<void> {
 	const onProgress = options.onProgress ?? (() => {});
 	const signal = options.signal;
@@ -138,6 +170,7 @@ export async function runTranscribeAndSummarizePipeline(
 	new Notice(t('Transcribing "{name}"...', { name: source.baseName }));
 	const transcribeStartedAt = Date.now();
 	const filePath = source.filePath ?? (source.audioFile ? resolvePhysicalPath(app, source.audioFile) : undefined);
+	const cacheKey = computeTranscriptionCacheKey(source, settings);
 	const transcription = await transcriptionProvider.transcribe({
 		audio: source.blob,
 		mimeType: source.mimeType,
@@ -147,6 +180,8 @@ export async function runTranscribeAndSummarizePipeline(
 		filePath,
 		onProgress,
 		signal,
+		cacheKey,
+		chunkCache: options.chunkCache,
 	});
 	logDebug("transcription finished", { durationMs: Date.now() - transcribeStartedAt, textLength: transcription.text.length, repetitionWarning: transcription.repetitionWarning });
 
@@ -174,6 +209,7 @@ export async function runTranscribeAndSummarizePipeline(
 			} else {
 				new Notice(t('Recording processed for "{name}" - transcript and summary are both off, nothing was kept.', { name: source.baseName }));
 			}
+			if (options.chunkCache) await options.chunkCache.clear(cacheKey);
 			logDebug("pipeline finished (transcript only, or nothing kept)");
 			return;
 		}
@@ -232,6 +268,7 @@ export async function runTranscribeAndSummarizePipeline(
 			await writeIntoNewNote(app, settings, source.baseName, summaryMarkdown, source.audioFile, transcriptPath);
 		}
 
+		if (options.chunkCache) await options.chunkCache.clear(cacheKey);
 		new Notice(t('Summary ready for "{name}".', { name: source.baseName }));
 		logDebug("pipeline finished (summary)");
 	} catch (error) {

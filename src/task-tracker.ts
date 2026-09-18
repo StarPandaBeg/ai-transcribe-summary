@@ -14,6 +14,11 @@ export interface TrackedTask {
 	startedAt: number;
 	canCancel: boolean;
 	progress?: TaskProgress;
+	error?: string;
+	errorDetails?: string;
+	canRetry?: boolean;
+	retryAction?: () => void;
+	completedAt?: number;
 }
 
 export type TaskTrackerListener = (tasks: readonly TrackedTask[]) => void;
@@ -32,16 +37,52 @@ export class TaskTracker {
 		this.notify();
 	}
 
-	update(id: string, changes: Partial<Pick<TrackedTask, "status" | "title" | "canCancel" | "progress">>): void {
+	update(
+		id: string,
+		changes: Partial<Pick<TrackedTask, "status" | "title" | "canCancel" | "progress" | "error" | "errorDetails" | "canRetry" | "retryAction">>
+	): void {
 		const task = this.tasks.get(id);
 		if (!task) return;
 		this.tasks.set(id, { ...task, ...changes });
 		this.notify();
 	}
 
+	fail(id: string, error: string, errorDetails?: string, retryAction?: () => void): void {
+		const task = this.tasks.get(id);
+		if (!task) return;
+		this.tasks.set(id, {
+			...task,
+			status: error,
+			error,
+			errorDetails,
+			canCancel: false,
+			progress: undefined,
+			canRetry: Boolean(retryAction),
+			retryAction,
+			completedAt: Date.now(),
+		});
+		this.notify();
+	}
+
 	finish(id: string): void {
 		if (!this.tasks.delete(id)) return;
 		this.notify();
+	}
+
+	dismiss(id: string): void {
+		if (!this.tasks.delete(id)) return;
+		this.notify();
+	}
+
+	clearFailed(): void {
+		let changed = false;
+		for (const [id, task] of this.tasks.entries()) {
+			if (task.error) {
+				this.tasks.delete(id);
+				changed = true;
+			}
+		}
+		if (changed) this.notify();
 	}
 
 	hasTask(id: string): boolean {

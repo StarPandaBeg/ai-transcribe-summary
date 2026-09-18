@@ -1,4 +1,3 @@
-import { RequestUrlParam, RequestUrlResponse } from "obsidian";
 import { chunkAtSilence, needsChunking } from "../audio/chunker";
 import { extractAudioFromVideo } from "../audio/video-extractor";
 import { t } from "../i18n";
@@ -41,7 +40,12 @@ interface TimedAudioPiece {
 }
 
 const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY_MS = 1000;
+let retryBaseDelayMs = 1000;
+
+export function setRetryBaseDelayMsForTest(ms: number): void {
+	retryBaseDelayMs = ms;
+}
+
 /** Chunk uploads should complete well within this; a stalled connection must not hang the pipeline forever. */
 const CHUNK_REQUEST_TIMEOUT_MS = 120_000;
 /** Chunk uploads in flight at once - bounded rather than unbounded so memory (each chunk's encoded WAV bytes held until its request completes) and provider rate-limit exposure stay modest on meetings with many chunks. */
@@ -96,10 +100,17 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.
-			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(audioBlob, maxChunkBytes), options, onProgress, signal);
+			pieces = await this.transcribeChunksConcurrently(
+				chunkAtSilence(audioBlob, maxChunkBytes),
+				options,
+				onProgress,
+				signal,
+				request.cacheKey,
+				request.chunkCache
+			);
 		} else {
 			const piece = { data: await audioBlob.arrayBuffer(), mimeType: audioBlob.type || request.mimeType, startSeconds: 0, chunkIndex: 0, chunkCount: 1 };
-			pieces = [await this.transcribeOnePiece(piece, options, 0, signal)];
+			pieces = [await this.transcribeChunkWithRetry(piece, options, 0, signal)];
 		}
 
 		logDebug("transcribe: piece count", pieces.length);
@@ -122,7 +133,9 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 		pieces: AsyncIterable<TimedAudioPiece, void, unknown>,
 		options: { vocabularyHints: string; language: string },
 		onProgress: ProgressCallback,
-		signal: AbortSignal | undefined
+		signal: AbortSignal | undefined,
+		cacheKey: string | undefined,
+		chunkCache: import("../audio/chunk-cache").ChunkCache | undefined
 	): Promise<TranscribedPiece[]> {
 		const iterator = pieces[Symbol.asyncIterator]();
 		const results: TranscribedPiece[] = [];
@@ -143,7 +156,27 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 					onProgress({ status: t("Transcribing {completed} of {total} chunks", { completed: 0, total: totalChunks }), completed: 0, total: totalChunks, unit: "chunks" });
 				}
 
-				results[piece.chunkIndex] = await this.transcribeOnePiece(piece, options, piece.chunkIndex, signal);
+				if (chunkCache && cacheKey) {
+					const cached = await chunkCache.get(cacheKey, piece.chunkIndex);
+					if (cached) {
+						logDebug(`transcribe: chunk ${piece.chunkIndex + 1} loaded from cache`);
+						results[piece.chunkIndex] = cached;
+						completedCount++;
+						onProgress({
+							status: t("Transcribed {completed} of {total} chunks", { completed: completedCount, total: piece.chunkCount }),
+							completed: completedCount,
+							total: piece.chunkCount,
+							unit: "chunks",
+						});
+						continue;
+					}
+				}
+
+				const transcribed = await this.transcribeChunkWithRetry(piece, options, piece.chunkIndex, signal);
+				results[piece.chunkIndex] = transcribed;
+				if (chunkCache && cacheKey) {
+					await chunkCache.set(cacheKey, piece.chunkIndex, transcribed);
+				}
 				completedCount++;
 				onProgress({
 					status: t("Transcribed {completed} of {total} chunks", { completed: completedCount, total: piece.chunkCount }),
@@ -158,6 +191,37 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 		await Promise.all(workers);
 
 		return results;
+	}
+
+	private async transcribeChunkWithRetry(
+		piece: TimedAudioPiece,
+		options: { vocabularyHints: string; language: string },
+		index: number,
+		signal: AbortSignal | undefined
+	): Promise<TranscribedPiece> {
+		let lastError: unknown;
+		for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+			if (signal?.aborted) throw new RequestAbortedError();
+			try {
+				if (attempt > 0) {
+					logDebug(`transcribe: retrying chunk ${index + 1} (attempt ${attempt + 1}/${MAX_RETRIES})`);
+				}
+				return await this.transcribeOnePiece(piece, options, index, signal);
+			} catch (error) {
+				if (error instanceof RequestAbortedError) throw error;
+				lastError = error;
+				const isNonRetryable =
+					error instanceof Error &&
+					(error.message.includes("413") || error.message.includes("401") || error.message.includes("403"));
+				if (isNonRetryable || attempt >= MAX_RETRIES - 1) {
+					break;
+				}
+				const delayMs = retryBaseDelayMs * 2 ** attempt;
+				logDebug(`transcribe: chunk ${index + 1} failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs}ms`, error);
+				await sleep(delayMs);
+			}
+		}
+		throw lastError;
 	}
 
 	private async transcribeOnePiece(
@@ -181,7 +245,7 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 
 		logDebug(`transcribe: uploading chunk ${index + 1}`, { bytes: piece.data.byteLength, model: this.config.apiModel });
 		const startedAt = Date.now();
-		const response = await this.requestWithRetry(
+		const response = await requestUrlWithTimeout(
 			{
 				url,
 				method: "POST",
@@ -190,6 +254,7 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 				headers: { Authorization: `Bearer ${this.config.apiKey}` },
 				throw: false,
 			},
+			CHUNK_REQUEST_TIMEOUT_MS,
 			signal
 		);
 		logDebug(`transcribe: chunk ${index + 1} responded`, { status: response.status, durationMs: Date.now() - startedAt, model: this.config.apiModel });
@@ -234,32 +299,9 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 		const end = piece.endSeconds ?? (responseDuration === undefined ? piece.startSeconds : piece.startSeconds + responseDuration);
 		return [{ start: piece.startSeconds, end, text: fallbackText, speaker: 0 }];
 	}
-
-	/** Retries on thrown errors (network failures) and on HTTP 429/5xx responses (rate limits, transient server errors) - anything else, including a user-initiated abort, is returned/thrown as-is for the caller to handle. */
-	private async requestWithRetry(params: RequestUrlParam, signal: AbortSignal | undefined): Promise<RequestUrlResponse> {
-		let lastError: unknown;
-		for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-			try {
-				const response = await requestUrlWithTimeout(params, CHUNK_REQUEST_TIMEOUT_MS, signal);
-				if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES - 1) {
-					logDebug(`transcribe: request returned HTTP ${response.status} (attempt ${attempt + 1}/${MAX_RETRIES}), retrying`);
-					await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
-					continue;
-				}
-				return response;
-			} catch (error) {
-				if (error instanceof RequestAbortedError) throw error;
-				lastError = error;
-				if (attempt < MAX_RETRIES - 1) {
-					logDebug(`transcribe: request failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying`, error);
-					await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
-				}
-			}
-		}
-		throw lastError;
-	}
 }
 
 function sleep(ms: number): Promise<void> {
+	if (ms <= 0) return Promise.resolve();
 	return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

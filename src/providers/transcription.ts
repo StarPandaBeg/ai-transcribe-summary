@@ -19,6 +19,10 @@ export interface TranscriptionRequest {
 	onProgress?: ProgressCallback;
 	/** When aborted, the provider stops waiting on/starting further requests and rejects with RequestAbortedError. */
 	signal?: AbortSignal;
+	/** Cache key uniquely identifying this transcription task to reuse already processed chunks upon restart. */
+	cacheKey?: string;
+	/** Storage for intermediate chunk transcription results. */
+	chunkCache?: import("../audio/chunk-cache").ChunkCache;
 }
 
 export interface TranscriptionResult {

@@ -1,5 +1,8 @@
 import { App, Editor, MarkdownView, Menu, Modal, normalizePath, Notice, Plugin, setIcon, Setting, TAbstractFile, TFile, TFolder } from "obsidian";
+import { VaultChunkCache } from "./audio/chunk-cache";
 import { AudioRecorder, isRecordingSilent, LEVEL_BAND_COUNT, RecordingResult } from "./audio/recorder";
+import { ErrorLogModal } from "./error-log-modal";
+import { ErrorTracker } from "./error-tracker";
 import { t } from "./i18n";
 import {
 	AudioSource,
@@ -249,13 +252,22 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private pipelineAnimationIntervalId: number | undefined;
 	private pipelineAnimationFrame = 0;
 	private taskTracker = new TaskTracker();
+	private chunkCache = new VaultChunkCache(this.app);
+	private errorTracker = new ErrorTracker(this.app);
 
 	async onload() {
 		await this.loadSettings();
+		await this.errorTracker.load();
 		this.registerView(TASK_CENTER_VIEW_TYPE, (leaf) =>
 			new TaskCenterView(leaf, this.taskTracker, {
 				cancelTask: (id) => this.stopPipelineJob(id),
 				stopRecording: () => this.requestStopRecording(),
+				openErrorLog: () => this.openErrorLog(),
+				retryTask: (id) => {
+					const task = this.taskTracker.getTasks().find((t) => t.id === id);
+					task?.retryAction?.();
+				},
+				dismissTask: (id) => this.taskTracker.dismiss(id),
 			})
 		);
 
@@ -274,6 +286,27 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			id: "open-task-center",
 			name: t("Open task center"),
 			callback: () => void this.openTaskCenter(),
+		});
+
+		this.addCommand({
+			id: "open-error-log",
+			name: t("Open error log"),
+			callback: () => this.openErrorLog(),
+		});
+
+		this.addCommand({
+			id: "copy-last-error",
+			name: t("Copy last error to clipboard"),
+			callback: async () => {
+				const latest = this.errorTracker.getLatestError();
+				if (!latest) {
+					new Notice(t("No errors recorded"));
+					return;
+				}
+				const text = `[${new Date(latest.timestamp).toLocaleString()}] ${latest.action}\n${latest.message}${latest.details ? `\n\n${latest.details}` : ""}`;
+				await navigator.clipboard.writeText(text);
+				new Notice(t("Error copied to clipboard"));
+			},
 		});
 
 		this.ribbonIconEl = this.addRibbonIcon("mic", t("Start meeting recording"), () => {
@@ -418,12 +451,15 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 	private async summarizeText(editor: Editor, text: string, replaceSelection: boolean, fileLabel: string): Promise<void> {
 		const { jobId, signal } = this.beginPipelineJob(t("Summarize “{name}”", { name: fileLabel }));
+		const taskId = `pipeline-${jobId}`;
+		let succeeded = false;
 		try {
 			await runSummarizeTextPipeline(this.settings, { text, editor, replaceSelection, fileLabel }, { onProgress: (status) => this.showPipelineProgress(jobId, status), signal });
+			succeeded = true;
 		} catch (error) {
-			this.reportPipelineError("summarize", error);
+			this.reportPipelineError("summarize", error, fileLabel, undefined, taskId);
 		} finally {
-			this.endPipelineJob(jobId);
+			this.endPipelineJob(jobId, succeeded);
 		}
 	}
 
@@ -451,8 +487,13 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				blob = new Blob([await this.app.vault.readBinary(file)], { type: mimeTypeForExtension(file.extension) });
 			}
 		} catch (error) {
-			this.taskTracker.finish(transitionTaskId);
-			this.reportPipelineError("transcribe & summarize", error);
+			this.reportPipelineError(
+				"transcribe & summarize",
+				error,
+				file.basename,
+				() => void this.transcribeAndSummarizeFile(file),
+				transitionTaskId
+			);
 			return;
 		}
 		await this.runPipelineWithSilenceCheck(
@@ -469,16 +510,21 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	/** Logs and surfaces a pipeline failure - a user-initiated stop gets a neutral Notice instead of the usual red "failed" one. */
-	private reportPipelineError(action: string, error: unknown) {
+	private reportPipelineError(action: string, error: unknown, sourceName?: string, retryAction?: () => void, taskId?: string) {
 		if (error instanceof RequestAbortedError) {
 			logDebug(`${action} stopped by user`, error);
 			new Notice(error.message);
+			if (taskId) this.taskTracker.finish(taskId);
 			return;
 		}
 		console.error(`ai-transcribe-summary: ${action} failed`, error);
+		const errorRecord = this.errorTracker.recordError(action, error, sourceName);
+		if (taskId) {
+			this.taskTracker.fail(taskId, errorRecord.message, errorRecord.details, retryAction);
+		}
 		const localizedAction = t(action);
 		const actionLabel = localizedAction === action ? `${action[0].toUpperCase()}${action.slice(1)}` : localizedAction;
-		new Notice(t("{action} failed: {message}", { action: actionLabel, message: error instanceof Error ? error.message : String(error) }));
+		new Notice(t("{action} failed: {message}. See AI tasks for details.", { action: actionLabel, message: errorRecord.message }), 10000);
 	}
 
 	/** Registers a new pipeline job with its own AbortController and returns its id/signal, to be passed to showPipelineProgress/endPipelineJob for the lifetime of that job. */
@@ -559,10 +605,12 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	/** Ends one pipeline job. Only stops the shared spinner/hides the status bar once no other job is still active. */
-	private endPipelineJob(jobId: number) {
+	private endPipelineJob(jobId: number, succeeded = true) {
 		this.activePipelineJobs.delete(jobId);
 		this.pipelineJobControllers.delete(jobId);
-		this.taskTracker.finish(`pipeline-${jobId}`);
+		if (succeeded) {
+			this.taskTracker.finish(`pipeline-${jobId}`);
+		}
 		if (this.activePipelineJobs.size > 0) {
 			this.renderPipelineProgress();
 			return;
@@ -854,18 +902,26 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 
 	private async runPipeline(source: AudioSource, transitionTaskId?: string) {
 		const { jobId, signal } = this.beginPipelineJob(t("Process “{name}”", { name: source.baseName }));
+		const taskId = `pipeline-${jobId}`;
 		if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
+		let succeeded = false;
 		try {
 			await runTranscribeAndSummarizePipeline(this.app, this.settings, source, {
 				targetView: this.lastMarkdownView,
 				onProgress: (status) => this.showPipelineProgress(jobId, status),
 				signal,
+				chunkCache: this.chunkCache,
 			});
+			succeeded = true;
 		} catch (error) {
-			this.reportPipelineError("transcribe & summarize", error);
+			this.reportPipelineError("transcribe & summarize", error, source.baseName, () => void this.runPipeline(source), taskId);
 		} finally {
-			this.endPipelineJob(jobId);
+			this.endPipelineJob(jobId, succeeded);
 		}
+	}
+
+	openErrorLog(): void {
+		new ErrorLogModal(this.app, this.errorTracker).open();
 	}
 
 	private async saveRecording(result: RecordingResult): Promise<TFile | undefined> {

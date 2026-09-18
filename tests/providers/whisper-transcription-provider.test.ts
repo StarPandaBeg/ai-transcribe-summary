@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { WhisperTranscriptionProvider } from "../../src/providers/whisper-transcription-provider";
+import { setRetryBaseDelayMsForTest, WhisperTranscriptionProvider } from "../../src/providers/whisper-transcription-provider";
 
 const { chunkAtSilenceMock, needsChunkingMock, requestUrlMock, extractAudioFromVideoMock } = vi.hoisted(() => ({
 	chunkAtSilenceMock: vi.fn(),
@@ -58,6 +58,7 @@ beforeEach(() => {
 	needsChunkingMock.mockReset();
 	needsChunkingMock.mockReturnValue(true);
 	extractAudioFromVideoMock.mockClear();
+	setRetryBaseDelayMsForTest(0);
 });
 
 describe("WhisperTranscriptionProvider concurrent chunk uploads", () => {
@@ -188,5 +189,69 @@ describe("WhisperTranscriptionProvider concurrent chunk uploads", () => {
 		await expect(
 			provider.transcribe({ audio: new Blob(["x"]), mimeType: "audio/webm", vocabularyHints: "", language: "" })
 		).rejects.toThrow('smaller upload limit than the 18MB chunk size configured');
+	});
+
+	it("retries a failed chunk up to 3 times and succeeds if a retry succeeds", async () => {
+		needsChunkingMock.mockReturnValue(true);
+		let callCount = 0;
+		requestUrlMock.mockImplementation(async () => {
+			callCount++;
+			if (callCount === 1) {
+				return { status: 500, text: "Internal Server Error" };
+			}
+			return { status: 200, json: { text: "recovered text" } };
+		});
+
+		const provider = new WhisperTranscriptionProvider("openai", { apiKey: "key", baseUrl: "https://api.openai.com/v1", apiModel: "whisper-1" });
+		const result = await provider.transcribe({ audio: fakeChunkedBlob(1), mimeType: "audio/webm", vocabularyHints: "", language: "" });
+
+		expect(result.text).toBe("recovered text");
+		expect(callCount).toBe(2);
+	});
+
+	it("fails after exhausting 3 chunk retries", async () => {
+		needsChunkingMock.mockReturnValue(true);
+		let callCount = 0;
+		requestUrlMock.mockImplementation(async () => {
+			callCount++;
+			return { status: 502, text: "Bad Gateway" };
+		});
+
+		const provider = new WhisperTranscriptionProvider("openai", { apiKey: "key", baseUrl: "https://api.openai.com/v1", apiModel: "whisper-1" });
+		await expect(
+			provider.transcribe({ audio: fakeChunkedBlob(1), mimeType: "audio/webm", vocabularyHints: "", language: "" })
+		).rejects.toThrow("Transcription failed on chunk 1 (HTTP 502)");
+
+		expect(callCount).toBe(3);
+	});
+
+	it("reuses cached chunks and only transcribes uncached ones", async () => {
+		needsChunkingMock.mockReturnValue(true);
+		const cachedPiece = { text: "from cache", segments: [{ start: 0, end: 10, text: "from cache", speaker: 0 as const }] };
+		const chunkCache = {
+			get: vi.fn(async (_key: string, idx: number) => (idx === 0 ? cachedPiece : undefined)),
+			set: vi.fn(async () => {}),
+			clear: vi.fn(async () => {}),
+			getCachedChunkIndices: vi.fn(async () => [0]),
+		};
+
+		requestUrlMock.mockResolvedValue({ status: 200, json: { text: "from api" } });
+
+		const provider = new WhisperTranscriptionProvider("openai", { apiKey: "key", baseUrl: "https://api.openai.com/v1", apiModel: "whisper-1" });
+		const result = await provider.transcribe({
+			audio: fakeChunkedBlob(2),
+			mimeType: "audio/webm",
+			vocabularyHints: "",
+			language: "",
+			cacheKey: "test-cache-key",
+			chunkCache,
+		});
+
+		// Only chunk 1 should have been requested via network
+		expect(requestUrlMock).toHaveBeenCalledTimes(1);
+		expect(chunkCache.get).toHaveBeenCalledWith("test-cache-key", 0);
+		expect(chunkCache.get).toHaveBeenCalledWith("test-cache-key", 1);
+		expect(chunkCache.set).toHaveBeenCalledWith("test-cache-key", 1, expect.objectContaining({ text: "from api" }));
+		expect(result.text).toBe("from cache from api");
 	});
 });
