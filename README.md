@@ -101,7 +101,8 @@ All three providers meter usage per request; check their pricing/quota pages ([O
 | Summary generation | Summary provider, model, temperature, the prompt used to structure the summary, and whether to reuse your transcription API key |
 | Custom vocabulary | Names/jargon hints passed to the transcription provider |
 | Recording | Microphone selection, audio bitrate, silence auto-stop, max duration, start/stop confirmation |
-| Output | Where the raw audio, transcript, and summary are saved, and whether the transcript lives in the same note as the summary, a dedicated file, or is discarded after summarizing |
+| Output placement | Where the raw audio, transcript, and summary are saved, and whether the transcript lives in the same note as the summary, a dedicated file, or is discarded after summarizing |
+| Output files | Save generated notes beside their source audio and customize transcript/summary file names with the `{name}` token |
 
 Every prompt (summary and cleanup) is fully editable, with a one-click reset back to the default.
 

@@ -10,7 +10,7 @@ vi.mock("../src/settings", () => ({}));
 vi.mock("../src/providers/factory", () => ({}));
 vi.mock("../src/providers/map-reduce-summarizer", () => ({}));
 
-const { resolveNonCollidingPath, resolveNonCollidingPathWithExtension } = await import("../src/pipeline");
+const { applyFileNameTemplate, resolveNonCollidingPath, resolveNonCollidingPathWithExtension, resolveResultFolder } = await import("../src/pipeline");
 
 /** Minimal fake App - only the vault.getAbstractFileByPath lookup that resolveNonCollidingPath(WithExtension) reads. `existingPaths` mimics files already present in the vault. */
 function fakeApp(existingPaths: string[]) {
@@ -52,16 +52,13 @@ describe("resolveNonCollidingPathWithExtension", () => {
 });
 
 describe("file naming end-to-end (audio/transcript/summary sharing one folder)", () => {
-	// Transcript/summary notes are always named from the audio file's own basename plus a fixed
-	// "-transcript"/"-summary" suffix - no template involved, so the two can never collide with each
-	// other (or with the audio file itself) even when all three folders point at the same place.
 	const audioBaseName = "2026-09-03 14-05-09";
 
 	it("produces three distinct file names from one shared folder and one shared audio base name", () => {
 		const app = fakeApp([]);
 		const audioPath = resolveNonCollidingPathWithExtension(app, "meetings", audioBaseName, "webm");
-		const transcriptPath = resolveNonCollidingPath(fakeApp([audioPath]), "meetings", `${audioBaseName}-transcript`);
-		const summaryPath = resolveNonCollidingPath(fakeApp([audioPath, transcriptPath]), "meetings", `${audioBaseName}-summary`);
+		const transcriptPath = resolveNonCollidingPath(fakeApp([audioPath]), "meetings", applyFileNameTemplate("{name}-transcript", audioBaseName));
+		const summaryPath = resolveNonCollidingPath(fakeApp([audioPath, transcriptPath]), "meetings", applyFileNameTemplate("{name}-summary", audioBaseName));
 
 		expect(new Set([audioPath, transcriptPath, summaryPath]).size).toBe(3);
 		expect(audioPath).toBe("meetings/2026-09-03 14-05-09.webm");
@@ -76,5 +73,26 @@ describe("file naming end-to-end (audio/transcript/summary sharing one folder)",
 
 		expect(transcriptPath).toBe("meetings/podcast-clip-transcript.md");
 		expect(summaryPath).toBe("meetings/podcast-clip-summary.md");
+	});
+});
+
+describe("output file settings", () => {
+	it("expands every source-name token in a custom file name", () => {
+		expect(applyFileNameTemplate("Transcript — {name} ({name})", "team-sync")).toBe("Transcript — team-sync (team-sync)");
+	});
+
+	it("uses the source audio folder when enabled", () => {
+		const audioFile = { path: "clients/acme/call.m4a" } as import("obsidian").TFile;
+		expect(resolveResultFolder("_meetings/transcripts", audioFile, true)).toBe("clients/acme");
+	});
+
+	it("uses the vault root for a root-level source audio file", () => {
+		const audioFile = { path: "call.m4a" } as import("obsidian").TFile;
+		expect(resolveResultFolder("_meetings/transcripts", audioFile, true)).toBe("");
+	});
+
+	it("falls back to the configured folder without a saved source audio file", () => {
+		expect(resolveResultFolder("_meetings/transcripts", undefined, true)).toBe("_meetings/transcripts");
+		expect(resolveResultFolder("_meetings/transcripts", { path: "call.m4a" } as import("obsidian").TFile, false)).toBe("_meetings/transcripts");
 	});
 });

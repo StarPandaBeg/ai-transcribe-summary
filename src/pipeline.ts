@@ -144,8 +144,6 @@ export async function runTranscribeAndSummarizePipeline(
 		new Notice(`Warning: possible repetition-loop artifact detected in the transcript for "${source.baseName}".`);
 	}
 
-	const audioLinkMarkdown = source.audioFile ? buildAudioLinkMarkdown(app, source.audioFile, activeView?.file?.path ?? "") : "";
-
 	// From here on (cleanup, summary, writing the note) a failure would otherwise discard a
 	// transcript that already cost a real transcription API call to produce. Catch it, save the
 	// raw transcript immediately so that cost isn't wasted, and tell the user where it landed
@@ -215,7 +213,7 @@ export async function runTranscribeAndSummarizePipeline(
 		// Audio link travels with the summary, not the transcript - it belongs in the main note
 		// (where the summary lands) even when transcript placement is "dedicated-file" and the
 		// transcript itself goes to a separate file the user may not open right away.
-		const summaryMarkdown = `${audioLinkMarkdown}${buildSummaryMarkdown(summaryResult.summary, transcription.repetitionWarning)}`;
+		const summaryMarkdown = buildSummaryMarkdown(summaryResult.summary, transcription.repetitionWarning);
 
 		// Same-note insertion only includes the transcript when transcribeAudio is on - otherwise
 		// there's nothing to append, and the summary is the whole story.
@@ -232,12 +230,14 @@ export async function runTranscribeAndSummarizePipeline(
 		const stillActiveView =
 			settings.summaryPlacement === "active-note" && activeView && app.workspace.getActiveViewOfType(MarkdownView) === activeView ? activeView : undefined;
 		if (stillActiveView) {
-			writeIntoActiveNote(stillActiveView, summaryMarkdown, includeTranscriptInline ? transcriptMarkdown : undefined);
+			const audioLinkMarkdown = source.audioFile ? buildAudioLinkMarkdown(app, source.audioFile, stillActiveView.file?.path ?? "") : "";
+			writeIntoActiveNote(stillActiveView, `${audioLinkMarkdown}${summaryMarkdown}`, includeTranscriptInline ? transcriptMarkdown : undefined);
 		} else {
 			if (settings.summaryPlacement === "active-note" && activeView) {
-				new Notice(`Couldn't detect the note to insert into - creating a new file in "${settings.summaryFolder}" instead.`);
+				const outputFolder = resolveResultFolder(settings.summaryFolder, source.audioFile, settings.saveResultsNextToSource) || "the vault root";
+				new Notice(`Couldn't detect the note to insert into - creating a new file in "${outputFolder}" instead.`);
 			}
-			await writeIntoNewNote(app, settings, source.baseName, summaryMarkdown, includeTranscriptInline ? transcriptMarkdown : undefined);
+			await writeIntoNewNote(app, settings, source.baseName, summaryMarkdown, includeTranscriptInline ? transcriptMarkdown : undefined, source.audioFile);
 		}
 
 		new Notice(`Summary ready for "${source.baseName}".`);
@@ -327,9 +327,10 @@ export async function runSummarizeTextPipeline(
 /** Best-effort rescue save of the raw transcript after a post-transcription failure - swallows its own errors so a failure here doesn't replace the original, more useful error with an unrelated file-write one. Named "-raw" since it's always the uncleaned transcript text, whether or not cleanup was enabled - the failure may be cleanup itself failing. */
 async function tryWriteRescueTranscript(app: App, settings: AiTranscribeSummarySettings, source: AudioSource, transcriptText: string): Promise<string | undefined> {
 	try {
-		const folderPath = normalizePath(settings.transcriptFolder);
+		const folderPath = resolveResultFolder(settings.transcriptFolder, source.audioFile, settings.saveResultsNextToSource);
 		await ensureFolder(app, folderPath);
-		const rescuePath = resolveNonCollidingPath(app, folderPath, `${source.baseName}-raw`);
+		const transcriptName = applyFileNameTemplate(settings.transcriptFileNameTemplate, source.baseName);
+		const rescuePath = resolveNonCollidingPath(app, folderPath, `${transcriptName}-raw`);
 		const audioLinkMarkdown = source.audioFile ? buildAudioLinkMarkdown(app, source.audioFile, rescuePath) : "";
 		await app.vault.create(rescuePath, `${audioLinkMarkdown}${buildTranscriptMarkdown(transcriptText)}`);
 		logDebug("rescue transcript written", { path: rescuePath });
@@ -356,9 +357,8 @@ function buildTranscriptMarkdown(transcript: string): string {
  * transcript/summary - `!` forces an embed (renders as a playable audio
  * widget) regardless of generateMarkdownLink's own wikilink-vs-markdown
  * choice, which just follows the vault's "Use [[Wikilinks]]" setting.
- * `sourcePath` is the path of the note the link will be written into (for a
- * correctly relative link); "" when there's no active note, i.e. it's about
- * to be written into a brand-new note at the vault root of summaryFolder.
+ * `sourcePath` is the final path of the note the link is written into, which
+ * keeps relative Markdown links correct when output follows its source audio.
  */
 function buildAudioLinkMarkdown(app: App, audioFile: TFile, sourcePath: string): string {
 	const link = app.fileManager.generateMarkdownLink(audioFile, sourcePath);
@@ -373,12 +373,20 @@ function writeIntoActiveNote(view: MarkdownView, summaryMarkdown: string, transc
 	logDebug("summary inserted into active note", { path: view.file?.path ?? null });
 }
 
-async function writeIntoNewNote(app: App, settings: AiTranscribeSummarySettings, baseName: string, summaryMarkdown: string, transcriptMarkdown: string | undefined): Promise<string> {
-	const folderPath = normalizePath(settings.summaryFolder);
+async function writeIntoNewNote(
+	app: App,
+	settings: AiTranscribeSummarySettings,
+	baseName: string,
+	summaryMarkdown: string,
+	transcriptMarkdown: string | undefined,
+	audioFile: TFile | undefined
+): Promise<string> {
+	const folderPath = resolveResultFolder(settings.summaryFolder, audioFile, settings.saveResultsNextToSource);
 	await ensureFolder(app, folderPath);
 
-	const content = transcriptMarkdown !== undefined ? `${summaryMarkdown}\n${transcriptMarkdown}` : summaryMarkdown;
-	const notePath = resolveNonCollidingPath(app, folderPath, `${baseName}-summary`);
+	const notePath = resolveNonCollidingPath(app, folderPath, applyFileNameTemplate(settings.summaryFileNameTemplate, baseName));
+	const audioLinkMarkdown = audioFile ? buildAudioLinkMarkdown(app, audioFile, notePath) : "";
+	const content = transcriptMarkdown !== undefined ? `${audioLinkMarkdown}${summaryMarkdown}\n${transcriptMarkdown}` : `${audioLinkMarkdown}${summaryMarkdown}`;
 	await app.vault.create(notePath, content);
 	logDebug("summary written to new note", { path: notePath });
 	return notePath;
@@ -400,13 +408,27 @@ async function writeTranscriptFile(
 	transcriptMarkdown: string,
 	audioFile: TFile | undefined
 ): Promise<string> {
-	const folderPath = normalizePath(settings.transcriptFolder);
+	const folderPath = resolveResultFolder(settings.transcriptFolder, audioFile, settings.saveResultsNextToSource);
 	await ensureFolder(app, folderPath);
-	const transcriptPath = resolveNonCollidingPath(app, folderPath, `${baseName}-transcript`);
+	const transcriptPath = resolveNonCollidingPath(app, folderPath, applyFileNameTemplate(settings.transcriptFileNameTemplate, baseName));
 	const audioLinkMarkdown = audioFile ? buildAudioLinkMarkdown(app, audioFile, transcriptPath) : "";
 	await app.vault.create(transcriptPath, `${audioLinkMarkdown}${transcriptMarkdown}`);
 	logDebug("transcript written to new note", { path: transcriptPath });
 	return transcriptPath;
+}
+
+/** Expands every source-name token so users can place the original audio name anywhere in an output filename. */
+export function applyFileNameTemplate(template: string, sourceName: string): string {
+	return template.replaceAll("{name}", sourceName);
+}
+
+/** Uses the source file's vault-relative parent when requested, while retaining configured folders for unsaved live recordings. */
+export function resolveResultFolder(configuredFolder: string, audioFile: TFile | undefined, saveNextToSource: boolean): string {
+	if (saveNextToSource && audioFile) {
+		const separatorIndex = audioFile.path.lastIndexOf("/");
+		return separatorIndex === -1 ? "" : audioFile.path.slice(0, separatorIndex);
+	}
+	return normalizePath(configuredFolder);
 }
 
 /** `<folderPath>/<baseName>.md`, or the same with a timestamp appended if that path is already taken - so re-running "Transcribe & summarize" on the same audio file creates a new note instead of throwing on Vault.create(). */
@@ -428,6 +450,7 @@ export function resolveNonCollidingPathWithExtension(app: App, folderPath: strin
 }
 
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
+	if (!folderPath || folderPath === "/") return;
 	const existing = app.vault.getAbstractFileByPath(folderPath);
 	if (!existing) {
 		await app.vault.createFolder(folderPath);
