@@ -22,7 +22,6 @@ function formatDuration(ms: number): string {
 export class TaskCenterView extends ItemView {
 	private unsubscribe: (() => void) | undefined;
 	private timerId: number | undefined;
-	private tasks: readonly TrackedTask[] = [];
 
 	constructor(leaf: WorkspaceLeaf, private tracker: TaskTracker, private actions: TaskCenterActions) {
 		super(leaf);
@@ -41,36 +40,57 @@ export class TaskCenterView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		this.unsubscribe = this.tracker.subscribe((tasks) => {
-			this.tasks = tasks;
-			this.render();
-			this.syncTimer();
-		});
+		this.ensureSubscribed();
+		this.render();
+		this.syncTimer();
 	}
 
 	async onClose(): Promise<void> {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.stopTimer();
-		this.contentEl.empty();
+	}
+
+	onResize(): void {
+		super.onResize();
+		this.ensureSubscribed();
+		this.render();
+		this.syncTimer();
+	}
+
+	refresh(): void {
+		this.ensureSubscribed();
+		this.render();
+		this.syncTimer();
+	}
+
+	private ensureSubscribed(): void {
+		if (this.unsubscribe) return;
+		this.unsubscribe = this.tracker.subscribe(() => {
+			this.render();
+			this.syncTimer();
+		});
 	}
 
 	private syncTimer(): void {
-		if (this.tasks.length > 0 && this.timerId === undefined) {
-			const viewWindow = this.contentEl.ownerDocument.defaultView;
-			if (viewWindow) this.timerId = viewWindow.setInterval(() => this.render(), 1000);
-		} else if (this.tasks.length === 0) {
+		const hasTasks = this.tracker.getTasks().length > 0;
+		if (hasTasks && this.timerId === undefined) {
+			const viewWindow = this.contentEl.ownerDocument.defaultView ?? window;
+			this.timerId = viewWindow.setInterval(() => this.render(), 1000);
+		} else if (!hasTasks) {
 			this.stopTimer();
 		}
 	}
 
 	private stopTimer(): void {
 		if (this.timerId === undefined) return;
-		this.contentEl.ownerDocument.defaultView?.clearInterval(this.timerId);
+		const viewWindow = this.contentEl.ownerDocument.defaultView ?? window;
+		viewWindow.clearInterval(this.timerId);
 		this.timerId = undefined;
 	}
 
 	private render(): void {
+		const tasks = this.tracker.getTasks();
 		const container = this.contentEl;
 		container.empty();
 		container.addClass("ai-transcribe-summary-task-center");
@@ -79,11 +99,11 @@ export class TaskCenterView extends ItemView {
 		header.createEl("h4", { text: t("Current tasks") });
 		header.createSpan({
 			cls: "ai-transcribe-summary-task-count",
-			text: this.tasks.length.toString(),
-			attr: { "aria-label": t("Active tasks: {count}", { count: this.tasks.length }) },
+			text: tasks.length.toString(),
+			attr: { "aria-label": t("Active tasks: {count}", { count: tasks.length }) },
 		});
 
-		if (this.tasks.length === 0) {
+		if (tasks.length === 0) {
 			const empty = container.createDiv({ cls: "ai-transcribe-summary-task-empty" });
 			const icon = empty.createDiv({ cls: "ai-transcribe-summary-task-empty-icon" });
 			setIcon(icon, "circle-check-big");
@@ -93,7 +113,13 @@ export class TaskCenterView extends ItemView {
 		}
 
 		const list = container.createDiv({ cls: "ai-transcribe-summary-task-list" });
-		for (const task of this.tasks) this.renderTask(list, task);
+		for (const task of tasks) {
+			try {
+				this.renderTask(list, task);
+			} catch (error) {
+				console.error("ai-transcribe-summary: failed to render task card", error);
+			}
+		}
 	}
 
 	private renderTask(list: HTMLElement, task: TrackedTask): void {

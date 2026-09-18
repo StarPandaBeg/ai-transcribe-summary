@@ -427,20 +427,34 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	}
 
 	private async transcribeAndSummarizeFile(file: TFile): Promise<void> {
+		const transitionTaskId = `file-${Date.now()}`;
+		this.taskTracker.start({
+			id: transitionTaskId,
+			kind: "pipeline",
+			title: t("Process “{name}”", { name: file.basename }),
+			status: t("Checking audio"),
+			startedAt: Date.now(),
+			canCancel: false,
+		});
+
 		let blob: Blob;
 		try {
 			blob = new Blob([await this.app.vault.readBinary(file)], { type: mimeTypeForExtension(file.extension) });
 		} catch (error) {
+			this.taskTracker.finish(transitionTaskId);
 			this.reportPipelineError("transcribe & summarize", error);
 			return;
 		}
-		await this.runPipelineWithSilenceCheck({
-			blob,
-			mimeType: blob.type,
-			baseName: file.basename,
-			audioFile: file,
-			extractAudio: isVideoFile(file),
-		});
+		await this.runPipelineWithSilenceCheck(
+			{
+				blob,
+				mimeType: blob.type,
+				baseName: file.basename,
+				audioFile: file,
+				extractAudio: isVideoFile(file),
+			},
+			transitionTaskId
+		);
 	}
 
 	/** Logs and surfaces a pipeline failure - a user-initiated stop gets a neutral Notice instead of the usual red "failed" one. */
@@ -495,7 +509,20 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			update.completed !== undefined && update.total !== undefined && update.total > 0
 				? { completed: Math.max(0, Math.min(update.completed, update.total)), total: update.total, unit: update.unit }
 				: undefined;
-		this.taskTracker.update(`pipeline-${jobId}`, { status: update.status, progress });
+		const taskId = `pipeline-${jobId}`;
+		if (!this.taskTracker.hasTask(taskId)) {
+			this.taskTracker.start({
+				id: taskId,
+				kind: "pipeline",
+				title: t("Process audio"),
+				status: update.status,
+				startedAt: Date.now(),
+				canCancel: true,
+				progress,
+			});
+		} else {
+			this.taskTracker.update(taskId, { status: update.status, progress });
+		}
 		this.statusBarItem.show();
 		this.statusBarDotEl.hide();
 		this.renderPipelineProgress();
@@ -734,7 +761,6 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			this.taskTracker.update("recording", { status: t("Saving audio") });
 			savedFile = await this.saveRecording(result);
 		}
-		this.taskTracker.finish("recording");
 
 		if (result.durationMs > LONG_RECORDING_WARNING_MS) {
 			new Notice(
@@ -745,12 +771,22 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			);
 		}
 
-		await this.runPipelineWithSilenceCheck({
-			blob: result.blob,
-			mimeType: result.mimeType,
-			baseName: savedFile?.basename ?? `meeting ${formatTimestampForFilename(new Date())}`,
-			audioFile: savedFile,
-		});
+		const shouldTranscribe = needsTranscription(this.settings);
+		if (shouldTranscribe) {
+			this.taskTracker.update("recording", { status: t("Checking audio") });
+		} else {
+			this.taskTracker.finish("recording");
+		}
+
+		await this.runPipelineWithSilenceCheck(
+			{
+				blob: result.blob,
+				mimeType: result.mimeType,
+				baseName: savedFile?.basename ?? `meeting ${formatTimestampForFilename(new Date())}`,
+				audioFile: savedFile,
+			},
+			shouldTranscribe ? "recording" : undefined
+		);
 	}
 
 	/**
@@ -760,11 +796,12 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	 * with a silent clip: a recording captured with no signal, or a pre-existing audio file
 	 * that's blank/corrupted.
 	 */
-	private async runPipelineWithSilenceCheck(source: AudioSource) {
+	private async runPipelineWithSilenceCheck(source: AudioSource, transitionTaskId?: string) {
 		// The check exists to protect the transcription API call from being wasted on a silent/dead
 		// clip - when nothing downstream (transcript, cleanup, summary) needs transcription at all,
 		// there's no such call to protect, so skip straight through.
 		if (!needsTranscription(this.settings)) {
+			if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
 			await this.runPipeline(source);
 			return;
 		}
@@ -772,7 +809,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		// Video is always decoded by the transcription provider and emitted as WAV chunks.
 		// Decoding it here too just to check silence would do the most memory-intensive work twice.
 		if (source.extractAudio) {
-			await this.runPipeline(source);
+			await this.runPipeline(source, transitionTaskId);
 			return;
 		}
 
@@ -792,19 +829,21 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			new SilentRecordingConfirmModal(
 				this.app,
 				undecodable,
-				() => void this.runPipeline(source),
+				() => void this.runPipeline(source, transitionTaskId),
 				() => {
+					if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
 					/* discarded - raw audio (if saveAudioFile is on, or the file already in the vault) is untouched */
 				}
 			).open();
 			return;
 		}
 
-		await this.runPipeline(source);
+		await this.runPipeline(source, transitionTaskId);
 	}
 
-	private async runPipeline(source: AudioSource) {
+	private async runPipeline(source: AudioSource, transitionTaskId?: string) {
 		const { jobId, signal } = this.beginPipelineJob(t("Process “{name}”", { name: source.baseName }));
+		if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
 		try {
 			await runTranscribeAndSummarizePipeline(this.app, this.settings, source, {
 				targetView: this.lastMarkdownView,
@@ -898,6 +937,9 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			await leaf.setViewState({ type: TASK_CENTER_VIEW_TYPE, active: true });
 		}
 		await this.app.workspace.revealLeaf(leaf);
+		if (leaf.view instanceof TaskCenterView) {
+			leaf.view.refresh();
+		}
 	}
 
 	async loadSettings() {

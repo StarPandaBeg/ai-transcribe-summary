@@ -44,14 +44,28 @@ export class TaskTracker {
 		this.notify();
 	}
 
+	hasTask(id: string): boolean {
+		return this.tasks.has(id);
+	}
+
 	subscribe(listener: TaskTrackerListener): () => void {
 		this.listeners.add(listener);
-		listener(this.getTasks());
+		try {
+			listener(this.getTasks());
+		} catch (error) {
+			console.error("ai-transcribe-summary: task tracker listener failed", error);
+		}
 		return () => this.listeners.delete(listener);
 	}
 
 	private notify(): void {
 		const tasks = this.getTasks();
-		for (const listener of this.listeners) listener(tasks);
+		for (const listener of this.listeners) {
+			try {
+				listener(tasks);
+			} catch (error) {
+				console.error("ai-transcribe-summary: task tracker listener failed", error);
+			}
+		}
 	}
 }

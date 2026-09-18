@@ -44,6 +44,8 @@ const RU: Record<string, string> = {
 	Paused: "Пауза",
 	"Finishing recording": "Завершение записи",
 	"Saving audio": "Сохранение аудио",
+	"Checking audio": "Проверка аудио",
+	"Process audio": "Обработка аудио",
 	"Could not start recording - check microphone permissions.": "Не удалось начать запись — проверьте разрешение на доступ к микрофону.",
 	"No microphone input detected. Check your mic - this recording may come out empty.":
 		"Сигнал с микрофона не обнаружен. Проверьте микрофон — запись может оказаться пустой.",

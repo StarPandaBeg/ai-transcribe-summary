@@ -35,4 +35,32 @@ describe("TaskTracker", () => {
 		expect(listener).toHaveBeenCalledTimes(1);
 		expect(tracker.getTasks()).toEqual([]);
 	});
+
+	it("checks task presence with hasTask", () => {
+		const tracker = new TaskTracker();
+		expect(tracker.hasTask("job-1")).toBe(false);
+
+		tracker.start({ id: "job-1", kind: "pipeline", title: "Job 1", status: "Starting", startedAt: 1, canCancel: true });
+		expect(tracker.hasTask("job-1")).toBe(true);
+
+		tracker.finish("job-1");
+		expect(tracker.hasTask("job-1")).toBe(false);
+	});
+
+	it("isolates errors in listeners so other listeners continue to receive notifications", () => {
+		const tracker = new TaskTracker();
+		const badListener = vi.fn().mockImplementation(() => {
+			throw new Error("listener error");
+		});
+		const goodListener = vi.fn();
+
+		tracker.subscribe(badListener);
+		tracker.subscribe(goodListener);
+
+		expect(() => {
+			tracker.start({ id: "safe", kind: "pipeline", title: "Safe", status: "Starting", startedAt: 1, canCancel: true });
+		}).not.toThrow();
+
+		expect(goodListener).toHaveBeenCalled();
+	});
 });
