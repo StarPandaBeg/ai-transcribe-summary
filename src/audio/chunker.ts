@@ -7,7 +7,7 @@ import { t } from "../i18n";
  * (Whisper accepts WAV directly - simpler and lossless vs. re-encoding to
  * webm/opus, and this only runs on the rare oversized recording).
  */
-const WHISPER_CHUNK_THRESHOLD_BYTES = 22 * 1024 * 1024;
+export const DEFAULT_WHISPER_CHUNK_THRESHOLD_BYTES = 22 * 1024 * 1024;
 const SILENCE_RMS_THRESHOLD = 0.01;
 const MIN_SILENCE_GAP_SECONDS = 0.5;
 const ANALYSIS_WINDOW_SECONDS = 0.05;
@@ -21,8 +21,8 @@ export interface AudioChunk {
 	chunkCount: number;
 }
 
-export function needsChunking(blob: Blob): boolean {
-	return blob.size > WHISPER_CHUNK_THRESHOLD_BYTES;
+export function needsChunking(blob: Blob, thresholdBytes = DEFAULT_WHISPER_CHUNK_THRESHOLD_BYTES): boolean {
+	return blob.size > thresholdBytes;
 }
 
 /**
@@ -32,7 +32,7 @@ export function needsChunking(blob: Blob): boolean {
  * all chunks simultaneously. The decoded PCM buffer itself must stay alive for the whole
  * generator's lifetime since chunks are sliced from it directly.
  */
-export async function* chunkAtSilence(blob: Blob, targetChunkBytes = WHISPER_CHUNK_THRESHOLD_BYTES): AsyncGenerator<AudioChunk, void, unknown> {
+export async function* chunkAtSilence(blob: Blob, targetChunkBytes = DEFAULT_WHISPER_CHUNK_THRESHOLD_BYTES): AsyncGenerator<AudioChunk, void, unknown> {
 	const audioContext = new AudioContext();
 	let buffer: AudioBuffer;
 	try {
@@ -76,23 +76,24 @@ export function findSilenceSplitPoints(buffer: AudioBuffer, targetChunkBytes: nu
 
 	const channelData = buffer.getChannelData(0);
 	const splitPoints: number[] = [];
-	let nextTarget = targetChunkSamples;
+	let startSample = 0;
 
-	while (nextTarget < buffer.length) {
-		const gapCenter = findNearestSilenceCenter(channelData, nextTarget, windowSamples, minGapSamples);
-		const splitAt = gapCenter ?? nextTarget;
+	while (startSample + targetChunkSamples < buffer.length) {
+		const target = startSample + targetChunkSamples;
+		const gapCenter = findNearestSilenceCenter(channelData, target, windowSamples, minGapSamples);
+		const splitAt = gapCenter !== undefined && gapCenter > startSample && gapCenter <= target ? gapCenter : target;
 		splitPoints.push(splitAt);
-		nextTarget = splitAt + targetChunkSamples;
+		startSample = splitAt;
 	}
 
 	return splitPoints;
 }
 
-/** Searches outward from `around` for a run of low-RMS windows at least `minGapSamples` long; returns its midpoint, or undefined if none found nearby. */
+/** Searches backward from `around` for a run of low-RMS windows at least `minGapSamples` long; returns its midpoint, or undefined if none found. */
 function findNearestSilenceCenter(channelData: Float32Array, around: number, windowSamples: number, minGapSamples: number): number | undefined {
 	const searchRadius = minGapSamples * 20;
 	const searchStart = Math.max(0, around - searchRadius);
-	const searchEnd = Math.min(channelData.length, around + searchRadius);
+	const searchEnd = Math.min(channelData.length, around);
 
 	let runStart: number | undefined;
 	let bestCenter: number | undefined;
@@ -114,6 +115,14 @@ function findNearestSilenceCenter(channelData: Float32Array, around: number, win
 				}
 			}
 			runStart = undefined;
+		}
+	}
+
+	if (runStart !== undefined && searchEnd - runStart >= minGapSamples) {
+		const center = Math.floor((runStart + searchEnd) / 2);
+		const distance = Math.abs(center - around);
+		if (distance < bestDistance) {
+			bestCenter = center;
 		}
 	}
 

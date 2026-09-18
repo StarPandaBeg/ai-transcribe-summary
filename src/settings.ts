@@ -201,6 +201,8 @@ export interface AiTranscribeSummarySettings {
 
 	/** ISO-639-1 code (e.g. "en", "es"). Empty means let Whisper auto-detect the language. */
 	transcriptionLanguage: string;
+	/** Maximum file size in MB sent to Whisper before splitting into chunks. */
+	whisperMaxFileSizeMb: number;
 
 	// Recording behavior
 	microphoneDeviceId: string;
@@ -263,6 +265,7 @@ export const DEFAULT_SETTINGS: AiTranscribeSummarySettings = {
 
 	vocabularyHints: "",
 	transcriptionLanguage: "",
+	whisperMaxFileSizeMb: 22,
 
 	microphoneDeviceId: "",
 	audioBitrateKbps: 32,
@@ -456,6 +459,8 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return settings.vocabularyHints;
 			case "transcriptionLanguage":
 				return settings.transcriptionLanguage;
+			case "whisperMaxFileSizeMb":
+				return settings.whisperMaxFileSizeMb;
 			case "audioBitrateKbps":
 				return String(settings.audioBitrateKbps);
 			case "silenceAutoStopMinutes":
@@ -581,6 +586,13 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 			case "transcriptionLanguage":
 				settings.transcriptionLanguage = value as string;
 				break;
+			case "whisperMaxFileSizeMb": {
+				const mb = Number(value);
+				if (Number.isFinite(mb) && mb >= 1 && mb <= 100) {
+					settings.whisperMaxFileSizeMb = mb;
+				}
+				break;
+			}
 			case "audioBitrateKbps":
 				settings.audioBitrateKbps = Number(value) as AudioBitrateKbps;
 				break;
@@ -702,6 +714,20 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				},
 				...this.buildTranscriptionProviderFields("openai"),
 				...this.buildTranscriptionProviderFields("openrouter"),
+				{
+					name: t("Max Whisper file size (MB)"),
+					desc: t("Maximum audio chunk size sent to Whisper. Recordings larger than this are split at points of silence. Lower this if your provider returns HTTP 413."),
+					visible: () => this.needsTranscription(),
+					control: {
+						type: "number",
+						key: "whisperMaxFileSizeMb",
+						placeholder: "22",
+						min: 1,
+						max: 100,
+						step: 1,
+						validate: (value) => (Number.isFinite(value) && value >= 1 && value <= 100 ? undefined : t("Must be between 1 and 100 MB.")),
+					},
+				},
 				{
 					name: t("Keep transcript"),
 					desc: t("Save the transcript in the format selected under Output files. Transcription still runs when summary generation is enabled, even if this is off. Turn on 'Save audio file' too, or a recording with this and summary generation both off keeps nothing."),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSilenceSplitPoints } from "../../src/audio/chunker";
+import { DEFAULT_WHISPER_CHUNK_THRESHOLD_BYTES, findSilenceSplitPoints, needsChunking } from "../../src/audio/chunker";
 
 const SAMPLE_RATE = 16000;
 const BYTES_PER_SAMPLE = 2; // mono, matches chunker's bytesPerSample = 2 * numberOfChannels
@@ -92,5 +92,31 @@ describe("findSilenceSplitPoints", () => {
 
 		expect(splitPoints).toHaveLength(1);
 		expect(splitPoints[0]).toBe(5 * SAMPLE_RATE);
+	});
+
+	it("never picks a split point beyond the target boundary even if silence extends past it", () => {
+		// Silence starts at 4.8s and continues until 5.8s, target is at 5.0s.
+		const data = concat(toneSeconds(4.8), silenceSeconds(1.0), toneSeconds(4.2));
+		const buffer = fakeMonoBuffer(data);
+		const targetChunkBytes = 5 * SAMPLE_RATE * BYTES_PER_SAMPLE;
+
+		const splitPoints = findSilenceSplitPoints(buffer, targetChunkBytes);
+
+		expect(splitPoints).toHaveLength(1);
+		expect(splitPoints[0]).toBeLessThanOrEqual(5 * SAMPLE_RATE);
+		expect(splitPoints[0]).toBeGreaterThanOrEqual(4.8 * SAMPLE_RATE);
+	});
+});
+
+describe("needsChunking", () => {
+	it("uses the 22MB default threshold", () => {
+		expect(needsChunking({ size: DEFAULT_WHISPER_CHUNK_THRESHOLD_BYTES } as Blob)).toBe(false);
+		expect(needsChunking({ size: DEFAULT_WHISPER_CHUNK_THRESHOLD_BYTES + 1 } as Blob)).toBe(true);
+	});
+
+	it("respects a custom threshold", () => {
+		const customLimit = 15 * 1024 * 1024;
+		expect(needsChunking({ size: customLimit } as Blob, customLimit)).toBe(false);
+		expect(needsChunking({ size: customLimit + 1 } as Blob, customLimit)).toBe(true);
 	});
 });

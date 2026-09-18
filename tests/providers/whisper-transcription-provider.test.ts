@@ -17,8 +17,8 @@ vi.mock("obsidian", () => ({
 
 vi.mock("../../src/audio/chunker", () => ({
 	needsChunking: needsChunkingMock,
-	chunkAtSilence: async function* (blob: Blob) {
-		chunkAtSilenceMock(blob);
+	chunkAtSilence: async function* (blob: Blob, targetChunkBytes?: number) {
+		chunkAtSilenceMock(blob, targetChunkBytes);
 		const chunkCount = (blob as unknown as { chunkCount: number }).chunkCount;
 		for (let i = 0; i < chunkCount; i++) {
 			yield {
@@ -70,7 +70,7 @@ describe("WhisperTranscriptionProvider concurrent chunk uploads", () => {
 
 		expect(result.text).toBe("video text");
 		expect(result.segments).toEqual([{ start: 0.5, end: 2.25, text: "video text", speaker: 0 }]);
-		expect(chunkAtSilenceMock).toHaveBeenCalledWith(video);
+		expect(chunkAtSilenceMock).toHaveBeenCalledWith(video, 22 * 1024 * 1024);
 		expect(onProgress).toHaveBeenCalledWith({ status: "Extracting audio from video" });
 		expect(onProgress).toHaveBeenCalledWith({ status: "Transcribing 0 of 1 chunks", completed: 0, total: 1, unit: "chunks" });
 		expect(onProgress).toHaveBeenCalledWith({ status: "Transcribed 1 of 1 chunks", completed: 1, total: 1, unit: "chunks" });
@@ -147,5 +147,37 @@ describe("WhisperTranscriptionProvider concurrent chunk uploads", () => {
 		await resultPromise;
 		expect(maxInFlight).toBeLessThanOrEqual(3);
 		expect(maxInFlight).toBeGreaterThan(1); // sanity check that it actually ran concurrently, not sequentially
+	});
+
+	it("uses custom maxFileSizeMb for chunk threshold and silence splitting", async () => {
+		needsChunkingMock.mockReturnValue(true);
+		requestUrlMock.mockResolvedValue({ status: 200, json: { text: "text" } });
+		const provider = new WhisperTranscriptionProvider("openai", {
+			apiKey: "key",
+			baseUrl: "https://api.openai.com/v1",
+			apiModel: "whisper-1",
+			maxFileSizeMb: 15,
+		});
+
+		const audio = fakeChunkedBlob(1);
+		await provider.transcribe({ audio, mimeType: "audio/webm", vocabularyHints: "", language: "" });
+
+		expect(needsChunkingMock).toHaveBeenCalledWith(audio, 15 * 1024 * 1024);
+		expect(chunkAtSilenceMock).toHaveBeenCalledWith(audio, 15 * 1024 * 1024);
+	});
+
+	it("reports the configured max file size in HTTP 413 error", async () => {
+		needsChunkingMock.mockReturnValue(false);
+		requestUrlMock.mockResolvedValue({ status: 413, text: "Payload Too Large" });
+		const provider = new WhisperTranscriptionProvider("openai", {
+			apiKey: "key",
+			baseUrl: "https://api.openai.com/v1",
+			apiModel: "whisper-1",
+			maxFileSizeMb: 18,
+		});
+
+		await expect(
+			provider.transcribe({ audio: new Blob(["x"]), mimeType: "audio/webm", vocabularyHints: "", language: "" })
+		).rejects.toThrow('smaller upload limit than the 18MB chunk size configured');
 	});
 });

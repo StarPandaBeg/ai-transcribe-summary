@@ -13,6 +13,7 @@ export interface WhisperProviderConfig {
 	baseUrl: string;
 	/** API model name as sent to the API (e.g. "whisper-1", "whisper-large-v3"). */
 	apiModel: string;
+	maxFileSizeMb?: number;
 }
 
 /** Whisper transcription response shape, narrowed to the fields this provider reads. */
@@ -69,7 +70,8 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 		const signal = request.signal;
 
 		const decodeBeforeUpload = request.extractAudio === true;
-		const chunked = decodeBeforeUpload || needsChunking(request.audio);
+		const maxChunkBytes = (this.config.maxFileSizeMb ?? 22) * 1024 * 1024;
+		const chunked = decodeBeforeUpload || needsChunking(request.audio, maxChunkBytes);
 		logDebug("transcribe: audio size", request.audio.size, "bytes, chunking:", chunked, "extracting audio:", decodeBeforeUpload, "model:", this.config.apiModel);
 
 		const options = { vocabularyHints: request.vocabularyHints, language: request.language };
@@ -80,7 +82,7 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 			// chunkAtSilence yields pieces one at a time rather than building the full array up
 			// front, so at most MAX_CONCURRENT_CHUNK_UPLOADS encoded WAV chunks are resident in
 			// memory alongside the decoded PCM buffer, not every chunk in the recording at once.
-			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(request.audio), options, onProgress, signal);
+			pieces = await this.transcribeChunksConcurrently(chunkAtSilence(request.audio, maxChunkBytes), options, onProgress, signal);
 		} else {
 			const piece = { data: await request.audio.arrayBuffer(), mimeType: request.audio.type || request.mimeType, startSeconds: 0, chunkIndex: 0, chunkCount: 1 };
 			pieces = [await this.transcribeOnePiece(piece, options, 0, signal)];
@@ -183,11 +185,16 @@ export class WhisperTranscriptionProvider implements TranscriptionProvider {
 		if (response.status >= 400) {
 			const detail = json?.error?.message ?? response.text;
 			if (response.status === 413) {
+				const maxMb = this.config.maxFileSizeMb ?? 22;
 				throw new Error(
-					t("Transcription failed on chunk {chunk} (HTTP 413: payload too large). The \"{model}\" model has a smaller upload limit than the ~22MB chunk size this plugin targets. Try a different transcription model (e.g. \"whisper-1\") or lower your recording bitrate in Settings.", {
-						chunk: index + 1,
-						model: this.config.apiModel,
-					})
+					t(
+						'Transcription failed on chunk {chunk} (HTTP 413: payload too large). The "{model}" model has a smaller upload limit than the {maxMb}MB chunk size configured. Try lowering "Max Whisper file size (MB)" in Settings or using a different model.',
+						{
+							chunk: index + 1,
+							model: this.config.apiModel,
+							maxMb,
+						}
+					)
 				);
 			}
 			throw new Error(t("Transcription failed on chunk {chunk} (HTTP {status}): {detail}", { chunk: index + 1, status: response.status, detail }));

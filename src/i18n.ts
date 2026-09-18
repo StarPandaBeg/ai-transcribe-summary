@@ -123,8 +123,8 @@ const RU: Record<string, string> = {
 	"{provider} API key is not set. Add it in Settings under Summary.": "API-ключ {provider} не задан. Добавьте его в настройках в разделе «Конспект».",
 	"{provider} API key is not set. Add it in Settings under \"{provider}\".":
 		"API-ключ {provider} не задан. Добавьте его в настройках в разделе «{provider}».",
-	"Transcription failed on chunk {chunk} (HTTP 413: payload too large). The \"{model}\" model has a smaller upload limit than the ~22MB chunk size this plugin targets. Try a different transcription model (e.g. \"whisper-1\") or lower your recording bitrate in Settings.":
-		"Не удалось транскрибировать фрагмент {chunk} (HTTP 413: слишком большой запрос). У модели «{model}» ограничение загрузки меньше примерно 22 МБ, на которые рассчитано разделение в плагине. Выберите другую модель транскрипции, например whisper-1, или уменьшите битрейт записи в настройках.",
+	'Transcription failed on chunk {chunk} (HTTP 413: payload too large). The "{model}" model has a smaller upload limit than the {maxMb}MB chunk size configured. Try lowering "Max Whisper file size (MB)" in Settings or using a different model.':
+		"Не удалось транскрибировать фрагмент {chunk} (HTTP 413: слишком большой запрос). У модели «{model}» ограничение загрузки меньше настроенных {maxMb} МБ. Уменьшите «Макс. размер файла для Whisper (МБ)» в настройках или выберите другую модель.",
 
 	Transcription: "Транскрипция",
 	Summary: "Конспект",
@@ -134,6 +134,7 @@ const RU: Record<string, string> = {
 	Support: "Поддержка",
 	"Transcription provider": "Провайдер транскрипции",
 	"Speaking language": "Язык речи",
+	"Max Whisper file size (MB)": "Макс. размер файла для Whisper (МБ)",
 	"Keep transcript": "Сохранять транскрипцию",
 	"Transcript folder": "Папка транскрипций",
 	"Clean up transcript": "Очищать транскрипцию",
@@ -172,6 +173,7 @@ const RU: Record<string, string> = {
 	"Request microphone access & refresh device list": "Запросить доступ к микрофону и обновить список устройств",
 	"Microphone {number}": "Микрофон {number}",
 	"Must be between 0 and 2.": "Значение должно быть от 0 до 2.",
+	"Must be between 1 and 100 MB.": "Значение должно быть от 1 до 100 МБ.",
 	"Must be greater than 0.": "Значение должно быть больше 0.",
 	"Enter a file name.": "Введите имя файла.",
 	"Leave off the file extension.": "Не указывайте расширение файла.",
@@ -231,6 +233,8 @@ const RU: Record<string, string> = {
 	"Gemini API docs": "документации API Gemini",
 	"Language spoken in your recordings. The transcript is written in this language, not translated - setting this just improves accuracy and speed, especially for short or accented recordings. Leave on auto-detect if recordings mix languages or aren't in the list.":
 		"Язык речи в записях. Транскрипция создаётся на этом языке без перевода; настройка лишь повышает точность и скорость, особенно для коротких записей и речи с акцентом. Выберите автоопределение для записей с несколькими языками или языком вне списка.",
+	"Maximum audio chunk size sent to Whisper. Recordings larger than this are split at points of silence. Lower this if your provider returns HTTP 413.":
+		"Максимальный размер аудиофрагмента, отправляемого в Whisper. Записи больше этого размера разделяются в паузах тишины. Уменьшите значение, если провайдер возвращает ошибку HTTP 413.",
 	"Save the transcript in the format selected under Output files. Transcription still runs when summary generation is enabled, even if this is off. Turn on 'Save audio file' too, or a recording with this and summary generation both off keeps nothing.":
 		"Сохранять транскрипцию в формате, выбранном в разделе «Выходные файлы». Если включено создание конспекта, транскрипция выполняется даже при отключённой настройке. Также включите сохранение аудиофайла, иначе при отключённом конспекте запись не сохранится.",
 	"Vault folder where transcript files are saved. When 'Save results next to source audio' is enabled, this is the fallback for recordings without a saved audio file.":

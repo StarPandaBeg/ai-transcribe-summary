@@ -11,6 +11,7 @@ export function createTranscriptionProvider(settings: AiTranscribeSummarySetting
 		apiKey: config.apiKey,
 		baseUrl: config.baseUrl,
 		apiModel: config.model,
+		maxFileSizeMb: settings.whisperMaxFileSizeMb,
 	});
 }
 
