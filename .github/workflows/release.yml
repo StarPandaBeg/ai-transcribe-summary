@@ -13,7 +13,6 @@ run-name: release ${{ inputs.version || '(auto)' }}
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.actor == 'onlyutkarsh'
     permissions:
       contents: write
       attestations: write
