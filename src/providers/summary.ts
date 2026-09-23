@@ -2,7 +2,7 @@ import type { SummaryProviderId } from "../settings";
 
 export interface SummaryRequest {
 	transcript: string;
-	/** Rendered summaryPrompt from settings (default or user-customized). */
+	/** Named summary prompt selected for this pipeline run. */
 	prompt: string;
 	/** When aborted, the provider stops waiting on/starting further requests and rejects with RequestAbortedError. */
 	signal?: AbortSignal;

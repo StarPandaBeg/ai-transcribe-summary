@@ -22,6 +22,43 @@
 	justify-content: flex-end;
 }
 
+.ai-transcribe-summary-prompt-card.setting-item {
+	display: grid;
+	grid-template-columns: minmax(10rem, 1fr) minmax(16rem, 2fr) auto auto;
+	align-items: start;
+	gap: var(--size-4-3);
+}
+
+.ai-transcribe-summary-prompt-card .setting-item-info {
+	grid-column: 1 / -1;
+}
+
+.ai-transcribe-summary-prompt-card .setting-item-control {
+	display: contents;
+}
+
+.ai-transcribe-summary-prompt-card input,
+.ai-transcribe-summary-prompt-card textarea {
+	width: 100%;
+}
+
+.ai-transcribe-summary-prompt-add.setting-item {
+	border-top: none;
+	padding-top: 0;
+	justify-content: flex-end;
+}
+
+@media (max-width: 700px) {
+	.ai-transcribe-summary-prompt-card.setting-item {
+		grid-template-columns: 1fr auto;
+	}
+
+	.ai-transcribe-summary-prompt-card textarea {
+		grid-column: 1 / -1;
+		grid-row: 3;
+	}
+}
+
 .ai-transcribe-summary-ribbon-icon {
 	--ai-transcribe-summary-bar-1: 0;
 	--ai-transcribe-summary-bar-2: 0;
@@ -370,4 +407,3 @@
 	white-space: pre-wrap;
 	word-break: break-word;
 }
-

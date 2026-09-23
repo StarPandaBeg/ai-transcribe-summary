@@ -7,6 +7,7 @@ import { summarizeLongTranscript } from "./providers/map-reduce-summarizer";
 import { RequestAbortedError } from "./providers/request-timeout";
 import type { TranscriptionSegment } from "./providers/transcription";
 import { AiTranscribeSummarySettings, SummaryMediaLinkMode, TranscriptOutputFormat, transcriptionKeyReuseTarget } from "./settings";
+import { resolveSummaryPrompt } from "./summary-prompts";
 
 export { RequestAbortedError };
 
@@ -124,6 +125,7 @@ export async function runTranscribeAndSummarizePipeline(
 	source: AudioSource,
 	options: {
 		targetView: MarkdownView | undefined;
+		summaryPrompt?: string;
 		onProgress?: ProgressCallback;
 		signal?: AbortSignal;
 		chunkCache?: import("./audio/chunk-cache").ChunkCache;
@@ -238,7 +240,8 @@ export async function runTranscribeAndSummarizePipeline(
 		onProgress({ status: t("Generating summary") });
 		new Notice(t('Generating summary for "{name}"...', { name: source.baseName }));
 		const summarizeStartedAt = Date.now();
-		const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: transcriptText, prompt: settings.summaryPrompt, signal }, onProgress);
+		const prompt = options.summaryPrompt ?? resolveSummaryPrompt(settings.summaryPrompts, settings.defaultSummaryPromptId).prompt;
+		const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: transcriptText, prompt, signal }, onProgress);
 		logDebug("summary finished", { durationMs: Date.now() - summarizeStartedAt, summaryLength: summaryResult.summary.length });
 
 		const summaryMarkdown = buildSummaryMarkdown(summaryResult.summary, transcription.repetitionWarning);
@@ -307,7 +310,7 @@ export interface TextSummarySource {
  * Summarizes arbitrary note/selection text directly - unlike
  * runTranscribeAndSummarizePipeline, there is no audio or transcription step:
  * the input text goes straight to the configured summary provider (reusing
- * the same summaryPrompt/model/map-reduce chunking as meeting summaries) and
+ * the default named prompt/model/map-reduce chunking as meeting summaries) and
  * the result is written back into the same editor, either replacing the
  * selection or inserted at the cursor.
  */
@@ -337,7 +340,8 @@ export async function runSummarizeTextPipeline(
 	onProgress({ status: t("Generating summary") });
 	new Notice(t('Generating summary for "{name}"...', { name: source.fileLabel }));
 	const summarizeStartedAt = Date.now();
-	const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: source.text, prompt: settings.summaryPrompt, signal }, onProgress);
+	const prompt = resolveSummaryPrompt(settings.summaryPrompts, settings.defaultSummaryPromptId).prompt;
+	const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: source.text, prompt, signal }, onProgress);
 	logDebug("summary finished", { durationMs: Date.now() - summarizeStartedAt, summaryLength: summaryResult.summary.length });
 
 	const summaryMarkdown = buildSummaryMarkdown(summaryResult.summary, false);

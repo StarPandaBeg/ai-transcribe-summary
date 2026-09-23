@@ -10,6 +10,7 @@ import {
 } from "obsidian";
 import { isRussianLocale, t } from "./i18n";
 import type AiTranscribeSummaryPlugin from "./main";
+import { createSummaryPrompt, DEFAULT_SUMMARY_PROMPT_ID, type SummaryPrompt } from "./summary-prompts";
 
 /** Masks a text input as a secret (password-style dots), for API keys. */
 function makeSecret(text: TextComponent): TextComponent {
@@ -184,7 +185,8 @@ export interface AiTranscribeSummarySettings {
 	// Active summary-generation provider + its per-provider config
 	summaryProvider: SummaryProviderId;
 	summaryProviders: SummaryProviderSettingsMap;
-	summaryPrompt: string;
+	summaryPrompts: SummaryPrompt[];
+	defaultSummaryPromptId: string;
 	/** Controls whether a transcript file is saved. Transcription still runs when summary generation is enabled. */
 	transcribeAudio: boolean;
 	/** When off, the pipeline stops after transcription - no LLM call, no summary note. */
@@ -257,7 +259,8 @@ export const DEFAULT_SETTINGS: AiTranscribeSummarySettings = {
 		openrouter: { apiKey: "", model: "openai/gpt-4o-mini", baseUrl: OPENROUTER_BASE_URL, temperature: DEFAULT_SUMMARY_TEMPERATURE },
 		gemini: { apiKey: "", model: "gemini-3.7-flash", baseUrl: GEMINI_BASE_URL, temperature: DEFAULT_SUMMARY_TEMPERATURE },
 	},
-	summaryPrompt: DEFAULT_SUMMARY_PROMPT,
+	summaryPrompts: [{ id: DEFAULT_SUMMARY_PROMPT_ID, name: t("Default"), prompt: DEFAULT_SUMMARY_PROMPT }],
+	defaultSummaryPromptId: DEFAULT_SUMMARY_PROMPT_ID,
 	transcribeAudio: true,
 	generateSummary: true,
 	reuseWhisperKeyForSummary: false,
@@ -396,7 +399,6 @@ const VISIBILITY_DRIVING_KEYS = new Set<string>([
 export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 	plugin: AiTranscribeSummaryPlugin;
 	private microphoneDropdown: DropdownComponent | undefined;
-	private summaryPromptTextArea: TextAreaComponent | undefined;
 	private cleanupPromptTextArea: TextAreaComponent | undefined;
 
 	constructor(app: App, plugin: AiTranscribeSummaryPlugin) {
@@ -456,8 +458,6 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return settings.summaryProviders.gemini.temperature;
 			case "summaryProviders.gemini.baseUrl":
 				return settings.summaryProviders.gemini.baseUrl;
-			case "summaryPrompt":
-				return settings.summaryPrompt;
 			case "vocabularyHints":
 				return settings.vocabularyHints;
 			case "transcriptionLanguage":
@@ -581,9 +581,6 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 			}
 			case "summaryProviders.gemini.baseUrl":
 				settings.summaryProviders.gemini.baseUrl = (value as string) || DEFAULT_SETTINGS.summaryProviders.gemini.baseUrl;
-				break;
-			case "summaryPrompt":
-				settings.summaryPrompt = (value as string) || DEFAULT_SUMMARY_PROMPT;
 				break;
 			case "vocabularyHints":
 				settings.vocabularyHints = value as string;
@@ -881,42 +878,35 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				...this.buildSummaryProviderFields("openrouter"),
 				...this.buildSummaryProviderFields("gemini"),
 				{
-					name: t("Summary prompt"),
-					desc: t("Instructions sent to the LLM to turn a transcript into a structured summary (Overview, Topics Discussed, Decisions Made, Action Items, Open Questions). Customize the wording, but keep it from inventing names/owners/dates not present in the transcript."),
+					name: t("Default summary prompt"),
+					desc: t("Used for recordings, commands, and note summaries. The file context menu lets you choose any prompt by name."),
 					visible: () => this.plugin.settings.generateSummary,
 					render: (setting) => {
-						this.summaryPromptTextArea = undefined; // Clear stale reference before creating new one
-						setting.setClass("ai-transcribe-summary-prompt-setting");
-						setting.addTextArea((text) => {
-							this.summaryPromptTextArea = text;
-							text
-								.setPlaceholder(DEFAULT_SUMMARY_PROMPT)
-								.setValue(this.plugin.settings.summaryPrompt)
-								.onChange(async (value) => {
-									this.plugin.settings.summaryPrompt = value || DEFAULT_SUMMARY_PROMPT;
-									await this.plugin.saveSettings();
-								});
-							text.inputEl.rows = 6;
-							text.inputEl.addClass("ai-transcribe-summary-prompt");
+						setting.addDropdown((dropdown) => {
+							for (const prompt of this.plugin.settings.summaryPrompts) dropdown.addOption(prompt.id, prompt.name);
+							dropdown.setValue(this.plugin.settings.defaultSummaryPromptId).onChange(async (value) => {
+								this.plugin.settings.defaultSummaryPromptId = value;
+								await this.plugin.saveSettings();
+							});
 						});
-						return () => {
-							this.summaryPromptTextArea = undefined;
-						};
 					},
 				},
+				...this.buildSummaryPromptFields(),
 				{
 					name: "",
 					visible: () => this.plugin.settings.generateSummary,
 					render: (setting) => {
-						setting.setClass("ai-transcribe-summary-prompt-reset");
+						setting.setClass("ai-transcribe-summary-prompt-add");
 						setting.addButton((button) =>
 							button
-								.setIcon("rotate-ccw")
-								.setButtonText(t("Reset to default prompt"))
+								.setIcon("plus")
+								.setButtonText(t("Add summary prompt"))
 								.onClick(async () => {
-									this.plugin.settings.summaryPrompt = DEFAULT_SUMMARY_PROMPT;
+									this.plugin.settings.summaryPrompts.push(
+										createSummaryPrompt(t("New prompt"), DEFAULT_SUMMARY_PROMPT)
+									);
 									await this.plugin.saveSettings();
-									this.summaryPromptTextArea?.setValue(DEFAULT_SUMMARY_PROMPT);
+									this.update();
 								})
 						);
 					},
@@ -946,6 +936,62 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				},
 			],
 		};
+	}
+
+	private buildSummaryPromptFields(): SettingGroupItem[] {
+		return this.plugin.settings.summaryPrompts.map((prompt, index) => ({
+			name: t("Summary prompt {number}", { number: index + 1 }),
+			desc: t("Name this prompt for the context menu, then enter the instructions sent to the language model."),
+			visible: () => this.plugin.settings.generateSummary,
+			render: (setting) => {
+				setting.setClass("ai-transcribe-summary-prompt-card");
+				setting.addText((text) => {
+					text
+						.setPlaceholder(t("Prompt name"))
+						.setValue(prompt.name)
+						.onChange(async (value) => {
+							prompt.name = value.trim() || t("Untitled prompt");
+							await this.plugin.saveSettings();
+						});
+					text.inputEl.addEventListener("blur", () => this.update());
+				});
+				setting.addTextArea((text) => {
+					text
+						.setPlaceholder(DEFAULT_SUMMARY_PROMPT)
+						.setValue(prompt.prompt)
+						.onChange(async (value) => {
+							prompt.prompt = value || DEFAULT_SUMMARY_PROMPT;
+							await this.plugin.saveSettings();
+						});
+					text.inputEl.rows = 6;
+					text.inputEl.addClass("ai-transcribe-summary-prompt");
+				});
+				setting.addExtraButton((button) =>
+					button
+						.setIcon("rotate-ccw")
+						.setTooltip(t("Reset to default prompt"))
+						.onClick(async () => {
+							prompt.prompt = DEFAULT_SUMMARY_PROMPT;
+							await this.plugin.saveSettings();
+							this.update();
+						})
+				);
+				setting.addExtraButton((button) =>
+					button
+						.setIcon("trash-2")
+						.setTooltip(t("Delete prompt"))
+						.setDisabled(this.plugin.settings.summaryPrompts.length === 1)
+						.onClick(async () => {
+							this.plugin.settings.summaryPrompts = this.plugin.settings.summaryPrompts.filter((item) => item.id !== prompt.id);
+							if (this.plugin.settings.defaultSummaryPromptId === prompt.id) {
+								this.plugin.settings.defaultSummaryPromptId = this.plugin.settings.summaryPrompts[0].id;
+							}
+							await this.plugin.saveSettings();
+							this.update();
+						})
+				);
+			},
+		}));
 	}
 
 	private buildSummaryProviderFields(providerId: SummaryProviderId): SettingGroupItem[] {
