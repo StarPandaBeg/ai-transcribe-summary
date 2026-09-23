@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { filterTranscriptArtifacts } from "../src/transcript-artifact-filter";
 
 // pipeline.ts pulls in settings.ts and providers/factory.ts, which pull in Obsidian UI classes
 // (PluginSettingTab, createFragment, ...) not worth stubbing just to satisfy a module-level
@@ -139,6 +140,20 @@ describe("output file settings", () => {
 		const json = buildTranscriptJson(segments);
 		expect(JSON.parse(json)).toEqual({ segments });
 		expect(json.endsWith("\n")).toBe(true);
+	});
+
+	it("omits excluded recognition artifacts from structured JSON transcripts", () => {
+		const filtered = filterTranscriptArtifacts(
+			"Useful content. Thanks for watching.",
+			[
+				{ start: 0, end: 2, text: "Useful content.", speaker: 0 as const },
+				{ start: 2, end: 4, text: "Thanks for watching.", speaker: 0 as const },
+			],
+			"Thanks for watching."
+		);
+		expect(JSON.parse(buildTranscriptJson(filtered.segments))).toEqual({
+			segments: [{ start: 0, end: 2, text: "Useful content.", speaker: 0 }],
+		});
 	});
 
 	it("restores the original plain transcript note format", () => {

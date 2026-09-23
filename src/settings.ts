@@ -194,9 +194,11 @@ export interface AiTranscribeSummarySettings {
 	/** Reuse the transcription provider's own apiKey for summaries instead of a separate key. Only applies when summaryProvider matches transcriptionProvider (see transcriptionKeyReuseTarget). */
 	reuseWhisperKeyForSummary: boolean;
 
-	/** Optional LLM cleanup pass over the text used for summarization. Saved transcripts retain the provider's original output. */
+	/** Optional LLM cleanup pass over the text used for summarization. Saved transcripts retain the artifact-filtered provider output. */
 	cleanupTranscript: boolean;
 	cleanupPrompt: string;
+	/** One exact segment phrase per line, removed from saved transcripts and summary input. */
+	excludedTranscriptPhrases: string;
 
 	// Custom vocabulary hints
 	vocabularyHints: string;
@@ -267,6 +269,7 @@ export const DEFAULT_SETTINGS: AiTranscribeSummarySettings = {
 
 	cleanupTranscript: false,
 	cleanupPrompt: DEFAULT_CLEANUP_PROMPT,
+	excludedTranscriptPhrases: "",
 
 	vocabularyHints: "",
 	transcriptionLanguage: "",
@@ -490,6 +493,8 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 				return settings.cleanupTranscript;
 			case "cleanupPrompt":
 				return settings.cleanupPrompt;
+			case "excludedTranscriptPhrases":
+				return settings.excludedTranscriptPhrases;
 			case "summaryFolder":
 				return settings.summaryFolder;
 			case "summaryFileNameTemplate":
@@ -634,6 +639,9 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 			case "cleanupPrompt":
 				settings.cleanupPrompt = (value as string) || DEFAULT_CLEANUP_PROMPT;
 				break;
+			case "excludedTranscriptPhrases":
+				settings.excludedTranscriptPhrases = value as string;
+				break;
 			case "summaryFolder":
 				settings.summaryFolder = (value as string) || DEFAULT_SETTINGS.summaryFolder;
 				break;
@@ -654,7 +662,7 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 		}
 
 		// Cleanup feeds only summary generation; saved transcript formats retain the provider's
-		// original output so timestamped variants stay aligned with the audio.
+		// artifact-filtered provider output so timestamped variants stay aligned with the audio.
 		if (key === "generateSummary" && !settings.generateSummary) {
 			settings.cleanupTranscript = false;
 		}
@@ -760,8 +768,26 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 					},
 				},
 				{
+					name: t("Excluded transcript phrases"),
+					desc: t("One recognition artifact per line. A transcription segment is removed when its full text matches a phrase, ignoring capitalization and extra spaces. The filtered result is used in saved transcripts, cleanup, and summaries."),
+					visible: () => this.needsTranscription(),
+					render: (setting) => {
+						setting.addTextArea((text) => {
+							text
+								.setPlaceholder(`${t("Thanks for watching.")}\n${t("Subtitles by the Amara.org community")}`)
+								.setValue(this.plugin.settings.excludedTranscriptPhrases)
+								.onChange(async (value) => {
+									this.plugin.settings.excludedTranscriptPhrases = value;
+									await this.plugin.saveSettings();
+								});
+							text.inputEl.rows = 5;
+							text.inputEl.addClass("ai-transcribe-summary-prompt");
+						});
+					},
+				},
+				{
 					name: t("Clean up transcript"),
-					desc: t("Run the transcript through an LLM to remove filler words, false starts, and grammar mistakes before summarization. Saved timestamped formats keep the provider's original segment text aligned with the audio. Uses the provider/model configured under Summary below and adds one extra LLM call per recording."),
+					desc: t("Run the transcript through an LLM to remove filler words, false starts, and grammar mistakes before summarization. Saved timestamped formats keep the filtered provider segments aligned with the audio. Uses the provider/model configured under Summary below and adds one extra LLM call per recording."),
 					visible: () => this.plugin.settings.generateSummary,
 					control: { type: "toggle", key: "cleanupTranscript" },
 				},

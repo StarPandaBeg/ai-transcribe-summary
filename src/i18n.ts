@@ -155,6 +155,11 @@ const RU: Record<string, string> = {
 	"Transcript folder": "Папка транскрипций",
 	"Clean up transcript": "Очищать транскрипцию",
 	"Cleanup prompt": "Промпт очистки",
+	"Excluded transcript phrases": "Исключаемые фразы транскрипции",
+	"One recognition artifact per line. A transcription segment is removed when its full text matches a phrase, ignoring capitalization and extra spaces. The filtered result is used in saved transcripts, cleanup, and summaries.":
+		"Один артефакт распознавания на строку. Сегмент транскрипции удаляется, если весь его текст совпадает с фразой без учёта регистра и лишних пробелов. Отфильтрованный результат используется в сохранённых транскрипциях, очистке и конспектах.",
+	"Thanks for watching.": "Спасибо за просмотр.",
+	"Subtitles by the Amara.org community": "Субтитры создавал DimaTorzok",
 	"Reset to default prompt": "Восстановить стандартный промпт",
 	"Generate summary after transcription": "Создавать конспект после транскрипции",
 	"Summary provider": "Провайдер конспекта",
@@ -273,8 +278,8 @@ const RU: Record<string, string> = {
 		"Сохранять транскрипцию в формате, выбранном в разделе «Выходные файлы». Если включено создание конспекта, транскрипция выполняется даже при отключённой настройке. Также включите сохранение аудиофайла, иначе при отключённом конспекте запись не сохранится.",
 	"Vault folder where transcript files are saved. When 'Save results next to source audio' is enabled, this is the fallback for recordings without a saved audio file.":
 		"Папка хранилища для файлов транскрипции. Если включено сохранение результатов рядом с исходным медиафайлом, эта папка используется для записей без сохранённого аудиофайла.",
-	"Run the transcript through an LLM to remove filler words, false starts, and grammar mistakes before summarization. Saved timestamped formats keep the provider's original segment text aligned with the audio. Uses the provider/model configured under Summary below and adds one extra LLM call per recording.":
-		"Перед созданием конспекта обработать транскрипцию языковой моделью: убрать слова-паразиты, оговорки и грамматические ошибки. В форматах с временными метками сохраняется исходный текст провайдера, синхронизированный с аудио. Использует провайдера и модель из раздела «Конспект» и добавляет один запрос к модели на запись.",
+	"Run the transcript through an LLM to remove filler words, false starts, and grammar mistakes before summarization. Saved timestamped formats keep the filtered provider segments aligned with the audio. Uses the provider/model configured under Summary below and adds one extra LLM call per recording.":
+		"Перед созданием конспекта обработать транскрипцию языковой моделью: убрать слова-паразиты, оговорки и грамматические ошибки. В форматах с временными метками сохраняются отфильтрованные сегменты провайдера, синхронизированные с аудио. Использует провайдера и модель из раздела «Конспект» и добавляет один запрос к модели на запись.",
 	"Instructions sent to the LLM to clean up the raw transcript. Customize the wording, but keep it from summarizing, shortening, or inventing content.":
 		"Инструкции для языковой модели по очистке исходной транскрипции. Формулировку можно изменить, но модель не должна сокращать, пересказывать или выдумывать содержание.",
 	"{provider} API key": "API-ключ {provider}",

@@ -4,10 +4,12 @@ import { logDebug } from "./log";
 import type { ProgressCallback } from "./progress";
 import { createSummaryProvider, createTranscriptionProvider, resolveSummaryApiKey } from "./providers/factory";
 import { summarizeLongTranscript } from "./providers/map-reduce-summarizer";
+import { hasRepetitionLoop } from "./providers/repetition-detector";
 import { RequestAbortedError } from "./providers/request-timeout";
 import type { TranscriptionSegment } from "./providers/transcription";
 import { AiTranscribeSummarySettings, SummaryMediaLinkMode, TranscriptOutputFormat, transcriptionKeyReuseTarget } from "./settings";
 import { resolveSummaryPrompt } from "./summary-prompts";
+import { filterTranscriptArtifacts } from "./transcript-artifact-filter";
 
 export { RequestAbortedError };
 
@@ -87,7 +89,7 @@ export function validateSummaryProviderConfig(settings: AiTranscribeSummarySetti
  *   summary/cleanup need transcript text even when the
  *   user doesn't want the raw transcript kept. See needsTranscription().
  * - cleanupTranscript only cleans the text passed into summary generation. Saved
- *   transcripts retain provider output so timestamped formats stay aligned with audio.
+ *   transcripts retain artifact-filtered provider output so timestamped formats stay aligned with audio.
  * - When both transcribeAudio and generateSummary are off, nothing downstream of
  *   transcription would ever be written, so transcription is skipped entirely and
  *   the recording is audio-only (targetView has no effect in that case).
@@ -173,7 +175,7 @@ export async function runTranscribeAndSummarizePipeline(
 	const transcribeStartedAt = Date.now();
 	const filePath = source.filePath ?? (source.audioFile ? resolvePhysicalPath(app, source.audioFile) : undefined);
 	const cacheKey = computeTranscriptionCacheKey(source, settings);
-	const transcription = await transcriptionProvider.transcribe({
+	const rawTranscription = await transcriptionProvider.transcribe({
 		audio: source.blob,
 		mimeType: source.mimeType,
 		vocabularyHints: settings.vocabularyHints,
@@ -185,6 +187,21 @@ export async function runTranscribeAndSummarizePipeline(
 		cacheKey,
 		chunkCache: options.chunkCache,
 	});
+	const filteredTranscript = filterTranscriptArtifacts(
+		rawTranscription.text,
+		rawTranscription.segments,
+		settings.excludedTranscriptPhrases
+	);
+	const transcription = {
+		...rawTranscription,
+		text: filteredTranscript.text,
+		segments: filteredTranscript.segments,
+		repetitionWarning:
+			filteredTranscript.removedCount > 0 ? hasRepetitionLoop(filteredTranscript.text) : rawTranscription.repetitionWarning,
+	};
+	if (filteredTranscript.removedCount > 0) {
+		logDebug("transcription artifacts excluded", { removedCount: filteredTranscript.removedCount });
+	}
 	logDebug("transcription finished", { durationMs: Date.now() - transcribeStartedAt, textLength: transcription.text.length, repetitionWarning: transcription.repetitionWarning });
 
 	if (transcription.repetitionWarning) {
@@ -355,7 +372,7 @@ export async function runSummarizeTextPipeline(
 	logDebug("text summary pipeline finished");
 }
 
-/** Best-effort rescue save of the raw transcript after a post-transcription failure - swallows its own errors so a failure here doesn't replace the original, more useful error with an unrelated file-write one. Named "-raw" since it's always the uncleaned transcript text, whether or not cleanup was enabled - the failure may be cleanup itself failing. */
+/** Best-effort rescue save of the uncleaned, artifact-filtered transcript after a post-transcription failure - swallows its own errors so a failure here doesn't replace the original, more useful error with an unrelated file-write one. Named "-raw" since it has not passed through LLM cleanup, whether or not cleanup was enabled - the failure may be cleanup itself failing. */
 async function tryWriteRescueTranscript(
 	app: App,
 	settings: AiTranscribeSummarySettings,
