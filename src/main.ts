@@ -102,6 +102,11 @@ interface NotebookNavigatorApi {
 	};
 }
 
+/** Obsidian uses this runtime API for native hover submenus but does not include it in the published MenuItem typings. */
+interface SubmenuCapableMenuItem {
+	setSubmenu(): Menu;
+}
+
 class StopRecordingConfirmModal extends Modal {
 	private confirmed = false;
 
@@ -396,12 +401,11 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private addFileMenuItems(menu: Pick<Menu, "addItem">, file: TFile) {
 		if (isSupportedMediaFile(file)) {
 			if (this.settings.generateSummary) {
-				menu.addItem((item) =>
-					item
-						.setTitle(t("Transcribe & summarize"))
-						.setIcon("captions")
-						.onClick((event) => this.openSummaryPromptMenu(file, event))
-				);
+				menu.addItem((item) => {
+					item.setTitle(t("Transcribe & summarize")).setIcon("captions");
+					const submenu = (item as unknown as SubmenuCapableMenuItem).setSubmenu();
+					this.addSummaryPromptMenuItems(submenu, file);
+				});
 			} else {
 				menu.addItem((item) =>
 					item
@@ -423,8 +427,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		}
 	}
 
-	private openSummaryPromptMenu(file: TFile, event: MouseEvent | KeyboardEvent): void {
-		const submenu = new Menu();
+	private addSummaryPromptMenuItems(submenu: Menu, file: TFile): void {
 		const choices = orderSummaryPromptChoices(this.settings.summaryPrompts, this.settings.defaultSummaryPromptId);
 		choices.forEach((prompt, index) => {
 			if (index === 1) submenu.addSeparator();
@@ -435,18 +438,6 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 					.onClick(() => void this.transcribeAndSummarizeFile(file, prompt.id))
 			);
 		});
-
-		const target = event.currentTarget as HTMLElement | null;
-		const targetRect = target?.getBoundingClientRect();
-		const targetDocument = target?.ownerDocument;
-		if (targetRect && targetDocument) {
-			submenu.showAtPosition({ x: targetRect.right, y: targetRect.top }, targetDocument);
-			return;
-		}
-
-		const pointerPosition = "clientX" in event ? { x: event.clientX, y: event.clientY } : { x: 0, y: 0 };
-		const document = (event.target as Node | null)?.ownerDocument ?? undefined;
-		submenu.showAtPosition(pointerPosition, document);
 	}
 
 	/**
