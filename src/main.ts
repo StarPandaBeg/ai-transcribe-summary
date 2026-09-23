@@ -28,7 +28,7 @@ import {
 	RUSSIAN_DEFAULT_CLEANUP_PROMPT,
 	RUSSIAN_DEFAULT_SUMMARY_PROMPT,
 } from "./settings";
-import { normalizeSummaryPrompts, resolveSummaryPrompt } from "./summary-prompts";
+import { normalizeSummaryPrompts, orderSummaryPromptChoices, resolveSummaryPrompt } from "./summary-prompts";
 import { TaskCenterView, TASK_CENTER_VIEW_TYPE } from "./task-center-view";
 import { TaskTracker } from "./task-tracker";
 import type { ProgressUpdate } from "./progress";
@@ -396,14 +396,12 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	private addFileMenuItems(menu: Pick<Menu, "addItem">, file: TFile) {
 		if (isSupportedMediaFile(file)) {
 			if (this.settings.generateSummary) {
-				for (const prompt of this.settings.summaryPrompts) {
-					menu.addItem((item) =>
-						item
-							.setTitle(t("Transcribe & summarize — {prompt}", { prompt: prompt.name }))
-							.setIcon("captions")
-							.onClick(() => void this.transcribeAndSummarizeFile(file, prompt.id))
-					);
-				}
+				menu.addItem((item) =>
+					item
+						.setTitle(t("Transcribe & summarize"))
+						.setIcon("captions")
+						.onClick((event) => this.openSummaryPromptMenu(file, event))
+				);
 			} else {
 				menu.addItem((item) =>
 					item
@@ -423,6 +421,32 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 					.onClick(() => void this.summarizeNoteFile(file))
 			);
 		}
+	}
+
+	private openSummaryPromptMenu(file: TFile, event: MouseEvent | KeyboardEvent): void {
+		const submenu = new Menu();
+		const choices = orderSummaryPromptChoices(this.settings.summaryPrompts, this.settings.defaultSummaryPromptId);
+		choices.forEach((prompt, index) => {
+			if (index === 1) submenu.addSeparator();
+			submenu.addItem((item) =>
+				item
+					.setTitle(index === 0 ? t("Default — {prompt}", { prompt: prompt.name }) : prompt.name)
+					.setIcon(index === 0 ? "star" : "captions")
+					.onClick(() => void this.transcribeAndSummarizeFile(file, prompt.id))
+			);
+		});
+
+		const target = event.currentTarget as HTMLElement | null;
+		const targetRect = target?.getBoundingClientRect();
+		const targetDocument = target?.ownerDocument;
+		if (targetRect && targetDocument) {
+			submenu.showAtPosition({ x: targetRect.right, y: targetRect.top }, targetDocument);
+			return;
+		}
+
+		const pointerPosition = "clientX" in event ? { x: event.clientX, y: event.clientY } : { x: 0, y: 0 };
+		const document = (event.target as Node | null)?.ownerDocument ?? undefined;
+		submenu.showAtPosition(pointerPosition, document);
 	}
 
 	/**

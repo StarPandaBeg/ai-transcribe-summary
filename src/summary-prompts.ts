@@ -54,6 +54,12 @@ export function resolveSummaryPrompt(prompts: readonly SummaryPrompt[], preferre
 	return prompts.find((prompt) => prompt.id === preferredId) ?? prompts[0];
 }
 
+/** Puts the configured default first and avoids offering that same prompt twice in selection menus. */
+export function orderSummaryPromptChoices(prompts: readonly SummaryPrompt[], defaultPromptId: string): SummaryPrompt[] {
+	const defaultPrompt = resolveSummaryPrompt(prompts, defaultPromptId);
+	return [defaultPrompt, ...prompts.filter((prompt) => prompt.id !== defaultPrompt.id)];
+}
+
 export function createSummaryPrompt(name: string, prompt: string): SummaryPrompt {
 	return {
 		id: `prompt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SUMMARY_PROMPT_ID, normalizeSummaryPrompts, resolveSummaryPrompt } from "../src/summary-prompts";
+import { DEFAULT_SUMMARY_PROMPT_ID, normalizeSummaryPrompts, orderSummaryPromptChoices, resolveSummaryPrompt } from "../src/summary-prompts";
 
 const defaultPrompt = "Current localized default";
 const knownDefaults = ["Old English default", "Old Russian default"];
@@ -37,6 +37,15 @@ describe("summary prompts", () => {
 	it("falls back to the first prompt when the selected id no longer exists", () => {
 		const prompts = [{ id: "first", name: "First", prompt: "First prompt" }];
 		expect(resolveSummaryPrompt(prompts, "deleted")).toBe(prompts[0]);
+	});
+
+	it("puts the default prompt first without duplicating it", () => {
+		const prompts = [
+			{ id: "one", name: "One", prompt: "First prompt" },
+			{ id: "two", name: "Two", prompt: "Second prompt" },
+			{ id: "three", name: "Three", prompt: "Third prompt" },
+		];
+		expect(orderSummaryPromptChoices(prompts, "two").map((prompt) => prompt.id)).toEqual(["two", "one", "three"]);
 	});
 
 	it("recovers from malformed persisted prompt data", () => {
