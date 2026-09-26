@@ -772,6 +772,7 @@ export class AiTranscribeSummarySettingTab extends PluginSettingTab {
 					desc: t("One recognition artifact per line. A transcription segment is removed when its full text matches a phrase, ignoring capitalization and extra spaces. The filtered result is used in saved transcripts, cleanup, and summaries."),
 					visible: () => this.needsTranscription(),
 					render: (setting) => {
+						setting.setClass("ai-transcribe-summary-prompt-setting");
 						setting.addTextArea((text) => {
 							text
 								.setPlaceholder(`${t("Thanks for watching.")}\n${t("Subtitles by the Amara.org community")}`)
