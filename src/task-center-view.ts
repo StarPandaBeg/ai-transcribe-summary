@@ -192,8 +192,7 @@ export class TaskCenterView extends ItemView {
 				});
 				setIcon(retryBtn, "rotate-cw");
 				retryBtn.addEventListener("click", () => {
-					this.tracker.update(task.id, { error: undefined, errorDetails: undefined, status: t("Starting") });
-					task.retryAction?.();
+					this.actions.retryTask ? this.actions.retryTask(task.id) : this.tracker.retry(task.id);
 				});
 			}
 

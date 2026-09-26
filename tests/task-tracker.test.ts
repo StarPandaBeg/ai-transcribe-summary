@@ -64,9 +64,12 @@ describe("TaskTracker", () => {
 		expect(goodListener).toHaveBeenCalled();
 	});
 
-	it("supports failing, retrying, and dismissing tasks", () => {
+	it("removes a failed attempt before starting its retry", () => {
 		const tracker = new TaskTracker();
-		const retryAction = vi.fn();
+		const retryAction = vi.fn(() => {
+			expect(tracker.hasTask("job-1")).toBe(false);
+			tracker.start({ id: "job-2", kind: "pipeline", title: "Job 1", status: "Starting", startedAt: 2, canCancel: true });
+		});
 
 		tracker.start({ id: "job-1", kind: "pipeline", title: "Job 1", status: "Starting", startedAt: 1, canCancel: true });
 		tracker.fail("job-1", "Upload failed", "HTTP 500 error", retryAction);
@@ -78,10 +81,23 @@ describe("TaskTracker", () => {
 		expect(task.canRetry).toBe(true);
 		expect(task.progress).toBeUndefined();
 
-		task.retryAction?.();
+		expect(tracker.retry("job-1")).toBe(true);
 		expect(retryAction).toHaveBeenCalledTimes(1);
+		expect(tracker.getTasks().map((item) => item.id)).toEqual(["job-2"]);
 
-		tracker.dismiss("job-1");
+		tracker.dismiss("job-2");
+		expect(tracker.getTasks()).toEqual([]);
+	});
+
+	it("ignores repeated retries for the same failed attempt", () => {
+		const tracker = new TaskTracker();
+		const retryAction = vi.fn();
+		tracker.start({ id: "job-1", kind: "pipeline", title: "Job 1", status: "Starting", startedAt: 1, canCancel: true });
+		tracker.fail("job-1", "Upload failed", undefined, retryAction);
+
+		expect(tracker.retry("job-1")).toBe(true);
+		expect(tracker.retry("job-1")).toBe(false);
+		expect(retryAction).toHaveBeenCalledTimes(1);
 		expect(tracker.getTasks()).toEqual([]);
 	});
 

@@ -64,6 +64,18 @@ export class TaskTracker {
 		this.notify();
 	}
 
+	/** Removes the failed attempt before starting its replacement, making retry one-shot even under repeated clicks. */
+	retry(id: string): boolean {
+		const task = this.tasks.get(id);
+		if (!task?.error || !task.canRetry || !task.retryAction) return false;
+
+		const retryAction = task.retryAction;
+		this.tasks.delete(id);
+		this.notify();
+		retryAction();
+		return true;
+	}
+
 	finish(id: string): void {
 		if (!this.tasks.delete(id)) return;
 		this.notify();

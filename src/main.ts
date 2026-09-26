@@ -270,8 +270,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				stopRecording: () => this.requestStopRecording(),
 				openErrorLog: () => this.openErrorLog(),
 				retryTask: (id) => {
-					const task = this.taskTracker.getTasks().find((t) => t.id === id);
-					task?.retryAction?.();
+					this.taskTracker.retry(id);
 				},
 				dismissTask: (id) => this.taskTracker.dismiss(id),
 			})
