@@ -34,6 +34,8 @@ const RU: Record<string, string> = {
 	"Summarize note": "Создать конспект заметки",
 	"Transcribe & summarize": "Транскрибировать и законспектировать",
 	Transcribe: "Транскрибировать",
+	"Transcribe only": "Только транскрибировать",
+	"Summarize transcript": "Создать конспект транскрипции",
 	"Default — {prompt}": "По умолчанию — {prompt}",
 	"Could not open \"{name}\" for editing.": "Не удалось открыть «{name}» для редактирования.",
 	"Summarize “{name}”": "Конспект «{name}»",
@@ -106,6 +108,8 @@ const RU: Record<string, string> = {
 	"The transcript was already produced and has been saved to \"{path}\" so it isn't lost. Fix the issue above, then re-run \"Transcribe & summarize\" on the audio file - or use the saved transcript directly.":
 		"Транскрипция уже получена и сохранена в «{path}», поэтому она не потеряна. Исправьте указанную выше ошибку, затем снова запустите транскрипцию и создание конспекта для аудиофайла — либо используйте сохранённую транскрипцию напрямую.",
 	"There's no text to summarize.": "Нет текста для создания конспекта.",
+	"This JSON file is not a valid transcript. Expected a segments array with text in each segment.":
+		"Этот JSON-файл не является корректной транскрипцией. Ожидается массив segments с текстом в каждом сегменте.",
 	"\"{path}\" exists but is not a folder.": "«{path}» существует, но не является папкой.",
 	"## Full Transcript": "## Полная транскрипция",
 	"Possible repetition-loop artifact detected in the transcript - review before trusting this summary.":

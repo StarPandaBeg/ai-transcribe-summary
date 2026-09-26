@@ -19,6 +19,7 @@ const {
 	buildTimestampedTranscriptMarkdown,
 	buildTranscriptContent,
 	buildTranscriptJson,
+	createTranscriptionOnlySettings,
 	formatMediaLink,
 	formatTranscriptTimestamp,
 	isAudioFile,
@@ -213,5 +214,19 @@ describe("supported media files", () => {
 
 	it("rejects unrelated files", () => {
 		expect(isSupportedMediaFile(file("md"))).toBe(false);
+	});
+});
+
+describe("transcription-only settings", () => {
+	it("forces transcript output and disables every summary pass without mutating saved settings", () => {
+		const settings = {
+			transcribeAudio: false,
+			generateSummary: true,
+			cleanupTranscript: true,
+		} as import("../src/settings").AiTranscribeSummarySettings;
+		const override = createTranscriptionOnlySettings(settings);
+
+		expect(override).toMatchObject({ transcribeAudio: true, generateSummary: false, cleanupTranscript: false });
+		expect(settings).toMatchObject({ transcribeAudio: false, generateSummary: true, cleanupTranscript: true });
 	});
 });

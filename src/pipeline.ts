@@ -38,6 +38,11 @@ export function needsTranscription(settings: AiTranscribeSummarySettings): boole
 	return settings.transcribeAudio || settings.generateSummary;
 }
 
+/** Creates a per-run override for the explicit context-menu action without mutating saved settings. */
+export function createTranscriptionOnlySettings(settings: AiTranscribeSummarySettings): AiTranscribeSummarySettings {
+	return { ...settings, transcribeAudio: true, generateSummary: false, cleanupTranscript: false };
+}
+
 /** Checks required API keys are set before any request is made, so a misconfigured provider fails immediately with a clear message instead of mid-upload. */
 export function validatePipelineConfig(settings: AiTranscribeSummarySettings): string | undefined {
 	if (!needsTranscription(settings)) return undefined;
@@ -323,6 +328,36 @@ export interface TextSummarySource {
 	fileLabel: string;
 }
 
+export interface TranscriptSummarySource {
+	text: string;
+	file: TFile;
+}
+
+async function generateTextSummary(
+	settings: AiTranscribeSummarySettings,
+	text: string,
+	fileLabel: string,
+	options: { summaryPrompt?: string; onProgress?: ProgressCallback; signal?: AbortSignal }
+): Promise<string> {
+	const onProgress = options.onProgress ?? (() => {});
+	const configError = validateSummaryProviderConfig(settings);
+	if (configError) {
+		logDebug("config validation failed", configError);
+		throw new Error(configError);
+	}
+	if (!text.trim()) throw new Error(t("There's no text to summarize."));
+
+	const summaryProvider = createSummaryProvider(settings);
+	logDebug("summary provider resolved", summaryProvider.id);
+	onProgress({ status: t("Generating summary") });
+	new Notice(t('Generating summary for "{name}"...', { name: fileLabel }));
+	const summarizeStartedAt = Date.now();
+	const prompt = options.summaryPrompt ?? resolveSummaryPrompt(settings.summaryPrompts, settings.defaultSummaryPromptId).prompt;
+	const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: text, prompt, signal: options.signal }, onProgress);
+	logDebug("summary finished", { durationMs: Date.now() - summarizeStartedAt, summaryLength: summaryResult.summary.length });
+	return buildSummaryMarkdown(summaryResult.summary, false);
+}
+
 /**
  * Summarizes arbitrary note/selection text directly - unlike
  * runTranscribeAndSummarizePipeline, there is no audio or transcription step:
@@ -334,34 +369,10 @@ export interface TextSummarySource {
 export async function runSummarizeTextPipeline(
 	settings: AiTranscribeSummarySettings,
 	source: TextSummarySource,
-	options: { onProgress?: ProgressCallback; signal?: AbortSignal }
+	options: { summaryPrompt?: string; onProgress?: ProgressCallback; signal?: AbortSignal }
 ): Promise<void> {
-	const onProgress = options.onProgress ?? (() => {});
-	const signal = options.signal;
-
 	logDebug("text summary pipeline started", { fileLabel: source.fileLabel, textLength: source.text.length });
-
-	const configError = validateSummaryProviderConfig(settings);
-	if (configError) {
-		logDebug("config validation failed", configError);
-		throw new Error(configError);
-	}
-
-	if (!source.text.trim()) {
-		throw new Error(t("There's no text to summarize."));
-	}
-
-	const summaryProvider = createSummaryProvider(settings);
-	logDebug("summary provider resolved", summaryProvider.id);
-
-	onProgress({ status: t("Generating summary") });
-	new Notice(t('Generating summary for "{name}"...', { name: source.fileLabel }));
-	const summarizeStartedAt = Date.now();
-	const prompt = resolveSummaryPrompt(settings.summaryPrompts, settings.defaultSummaryPromptId).prompt;
-	const summaryResult = await summarizeLongTranscript(summaryProvider, { transcript: source.text, prompt, signal }, onProgress);
-	logDebug("summary finished", { durationMs: Date.now() - summarizeStartedAt, summaryLength: summaryResult.summary.length });
-
-	const summaryMarkdown = buildSummaryMarkdown(summaryResult.summary, false);
+	const summaryMarkdown = await generateTextSummary(settings, source.text, source.fileLabel, options);
 	if (source.replaceSelection) {
 		source.editor.replaceSelection(summaryMarkdown);
 	} else {
@@ -370,6 +381,20 @@ export async function runSummarizeTextPipeline(
 
 	new Notice(t('Summary ready for "{name}".', { name: source.fileLabel }));
 	logDebug("text summary pipeline finished");
+}
+
+/** Summarizes a saved structured transcript into a new note, retaining a frontmatter link to its JSON source. */
+export async function runSummarizeTranscriptPipeline(
+	app: App,
+	settings: AiTranscribeSummarySettings,
+	source: TranscriptSummarySource,
+	options: { summaryPrompt?: string; onProgress?: ProgressCallback; signal?: AbortSignal }
+): Promise<void> {
+	logDebug("transcript summary pipeline started", { path: source.file.path, textLength: source.text.length });
+	const summaryMarkdown = await generateTextSummary(settings, source.text, source.file.basename, options);
+	await writeIntoNewNote(app, settings, source.file.basename, summaryMarkdown, undefined, source.file.path, source.file);
+	new Notice(t('Summary ready for "{name}".', { name: source.file.basename }));
+	logDebug("transcript summary pipeline finished");
 }
 
 /** Best-effort rescue save of the uncleaned, artifact-filtered transcript after a post-transcription failure - swallows its own errors so a failure here doesn't replace the original, more useful error with an unrelated file-write one. Named "-raw" since it has not passed through LLM cleanup, whether or not cleanup was enabled - the failure may be cleanup itself failing. */
@@ -490,9 +515,10 @@ async function writeIntoNewNote(
 	baseName: string,
 	summaryMarkdown: string,
 	audioFile: TFile | undefined,
-	transcriptPath: string | undefined
+	transcriptPath: string | undefined,
+	resultFolderSource: TFile | undefined = audioFile
 ): Promise<string> {
-	const folderPath = resolveResultFolder(settings.summaryFolder, audioFile, settings.saveResultsNextToSource);
+	const folderPath = resolveResultFolder(settings.summaryFolder, resultFolderSource, settings.saveResultsNextToSource);
 	await ensureFolder(app, folderPath);
 
 	const notePath = resolveNonCollidingPath(app, folderPath, applyFileNameTemplate(settings.summaryFileNameTemplate, baseName));

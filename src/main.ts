@@ -6,6 +6,7 @@ import { ErrorTracker } from "./error-tracker";
 import { t } from "./i18n";
 import {
 	AudioSource,
+	createTranscriptionOnlySettings,
 	formatTimestampForFilename,
 	isSupportedMediaFile,
 	isVideoFile,
@@ -15,6 +16,7 @@ import {
 	resolveNonCollidingPathWithExtension,
 	resolvePhysicalPath,
 	runSummarizeTextPipeline,
+	runSummarizeTranscriptPipeline,
 	runTranscribeAndSummarizePipeline,
 } from "./pipeline";
 import {
@@ -29,6 +31,7 @@ import {
 	RUSSIAN_DEFAULT_SUMMARY_PROMPT,
 } from "./settings";
 import { normalizeSummaryPrompts, orderSummaryPromptChoices, resolveSummaryPrompt } from "./summary-prompts";
+import { readTranscriptJson } from "./transcript-json";
 import { TaskCenterView, TASK_CENTER_VIEW_TYPE } from "./task-center-view";
 import { TaskTracker } from "./task-tracker";
 import type { ProgressUpdate } from "./progress";
@@ -403,16 +406,33 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				menu.addItem((item) => {
 					item.setTitle(t("Transcribe & summarize")).setIcon("captions");
 					const submenu = (item as unknown as SubmenuCapableMenuItem).setSubmenu();
-					this.addSummaryPromptMenuItems(submenu, file);
+					this.addSummaryPromptMenuItems(submenu, (promptId) => void this.transcribeAndSummarizeFile(file, promptId));
 				});
 			} else {
 				menu.addItem((item) =>
 					item
 						.setTitle(t("Transcribe"))
 						.setIcon("captions")
-						.onClick(() => void this.transcribeAndSummarizeFile(file))
+						.onClick(() => void this.transcribeAndSummarizeFile(file, undefined, true))
 				);
 			}
+			if (isVideoFile(file) && this.settings.generateSummary) {
+				menu.addItem((item) =>
+					item
+						.setTitle(t("Transcribe only"))
+						.setIcon("captions")
+						.onClick(() => void this.transcribeAndSummarizeFile(file, undefined, true))
+				);
+			}
+			return;
+		}
+
+		if (file.extension.toLowerCase() === "json") {
+			menu.addItem((item) => {
+				item.setTitle(t("Summarize transcript")).setIcon("file-text");
+				const submenu = (item as unknown as SubmenuCapableMenuItem).setSubmenu();
+				this.addSummaryPromptMenuItems(submenu, (promptId) => void this.summarizeTranscriptFile(file, promptId));
+			});
 			return;
 		}
 
@@ -426,7 +446,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		}
 	}
 
-	private addSummaryPromptMenuItems(submenu: Menu, file: TFile): void {
+	private addSummaryPromptMenuItems(submenu: Menu, onSelect: (promptId: string) => void): void {
 		const choices = orderSummaryPromptChoices(this.settings.summaryPrompts, this.settings.defaultSummaryPromptId);
 		choices.forEach((prompt, index) => {
 			if (index === 1) submenu.addSeparator();
@@ -434,7 +454,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				item
 					.setTitle(index === 0 ? t("Default — {prompt}", { prompt: prompt.name }) : prompt.name)
 					.setIcon(index === 0 ? "star" : "captions")
-					.onClick(() => void this.transcribeAndSummarizeFile(file, prompt.id))
+					.onClick(() => onSelect(prompt.id))
 			);
 		});
 	}
@@ -475,6 +495,26 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		await this.summarizeText(view.editor, view.editor.getValue(), false, file.basename);
 	}
 
+	private async summarizeTranscriptFile(file: TFile, summaryPromptId: string): Promise<void> {
+		const summaryPrompt = resolveSummaryPrompt(this.settings.summaryPrompts, summaryPromptId).prompt;
+		const { jobId, signal } = this.beginPipelineJob(t("Summarize “{name}”", { name: file.basename }));
+		const taskId = `pipeline-${jobId}`;
+		let succeeded = false;
+		try {
+			const text = readTranscriptJson(await this.app.vault.read(file), this.settings.excludedTranscriptPhrases);
+			await runSummarizeTranscriptPipeline(this.app, this.settings, { text, file }, {
+				summaryPrompt,
+				onProgress: (status) => this.showPipelineProgress(jobId, status),
+				signal,
+			});
+			succeeded = true;
+		} catch (error) {
+			this.reportPipelineError("summarize", error, file.basename, () => void this.summarizeTranscriptFile(file, summaryPromptId), taskId);
+		} finally {
+			this.endPipelineJob(jobId, succeeded);
+		}
+	}
+
 	private async summarizeText(editor: Editor, text: string, replaceSelection: boolean, fileLabel: string): Promise<void> {
 		const { jobId, signal } = this.beginPipelineJob(t("Summarize “{name}”", { name: fileLabel }));
 		const taskId = `pipeline-${jobId}`;
@@ -489,7 +529,8 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 		}
 	}
 
-	private async transcribeAndSummarizeFile(file: TFile, summaryPromptId?: string): Promise<void> {
+	private async transcribeAndSummarizeFile(file: TFile, summaryPromptId?: string, transcribeOnly = false): Promise<void> {
+		const pipelineSettings = transcribeOnly ? createTranscriptionOnlySettings(this.settings) : this.settings;
 		const summaryPrompt = summaryPromptId
 			? resolveSummaryPrompt(this.settings.summaryPrompts, summaryPromptId).prompt
 			: resolveSummaryPrompt(this.settings.summaryPrompts, this.settings.defaultSummaryPromptId).prompt;
@@ -517,10 +558,10 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			}
 		} catch (error) {
 			this.reportPipelineError(
-				"transcribe & summarize",
+				transcribeOnly ? "transcribe" : "transcribe & summarize",
 				error,
 				file.basename,
-				() => void this.transcribeAndSummarizeFile(file, summaryPromptId),
+				() => void this.transcribeAndSummarizeFile(file, summaryPromptId, transcribeOnly),
 				transitionTaskId
 			);
 			return;
@@ -535,7 +576,8 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 				filePath: physicalPath,
 			},
 			transitionTaskId,
-			summaryPrompt
+			summaryPrompt,
+			pipelineSettings
 		);
 	}
 
@@ -885,20 +927,25 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 	 * with a silent clip: a recording captured with no signal, or a pre-existing audio file
 	 * that's blank/corrupted.
 	 */
-	private async runPipelineWithSilenceCheck(source: AudioSource, transitionTaskId?: string, summaryPrompt?: string) {
+	private async runPipelineWithSilenceCheck(
+		source: AudioSource,
+		transitionTaskId?: string,
+		summaryPrompt?: string,
+		pipelineSettings: AiTranscribeSummarySettings = this.settings
+	) {
 		// The check exists to protect the transcription API call from being wasted on a silent/dead
 		// clip - when nothing downstream (transcript, cleanup, summary) needs transcription at all,
 		// there's no such call to protect, so skip straight through.
-		if (!needsTranscription(this.settings)) {
+		if (!needsTranscription(pipelineSettings)) {
 			if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
-			await this.runPipeline(source, undefined, summaryPrompt);
+			await this.runPipeline(source, undefined, summaryPrompt, pipelineSettings);
 			return;
 		}
 
 		// Video is always decoded by the transcription provider and emitted as WAV chunks.
 		// Decoding it here too just to check silence would do the most memory-intensive work twice.
 		if (source.extractAudio) {
-			await this.runPipeline(source, transitionTaskId, summaryPrompt);
+			await this.runPipeline(source, transitionTaskId, summaryPrompt, pipelineSettings);
 			return;
 		}
 
@@ -918,7 +965,7 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			new SilentRecordingConfirmModal(
 				this.app,
 				undecodable,
-				() => void this.runPipeline(source, transitionTaskId, summaryPrompt),
+				() => void this.runPipeline(source, transitionTaskId, summaryPrompt, pipelineSettings),
 				() => {
 					if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
 					/* discarded - raw audio (if saveAudioFile is on, or the file already in the vault) is untouched */
@@ -927,16 +974,21 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			return;
 		}
 
-		await this.runPipeline(source, transitionTaskId, summaryPrompt);
+		await this.runPipeline(source, transitionTaskId, summaryPrompt, pipelineSettings);
 	}
 
-	private async runPipeline(source: AudioSource, transitionTaskId?: string, summaryPrompt?: string) {
+	private async runPipeline(
+		source: AudioSource,
+		transitionTaskId?: string,
+		summaryPrompt?: string,
+		pipelineSettings: AiTranscribeSummarySettings = this.settings
+	) {
 		const { jobId, signal } = this.beginPipelineJob(t("Process “{name}”", { name: source.baseName }));
 		const taskId = `pipeline-${jobId}`;
 		if (transitionTaskId) this.taskTracker.finish(transitionTaskId);
 		let succeeded = false;
 		try {
-			await runTranscribeAndSummarizePipeline(this.app, this.settings, source, {
+			await runTranscribeAndSummarizePipeline(this.app, pipelineSettings, source, {
 				targetView: this.lastMarkdownView,
 				summaryPrompt,
 				onProgress: (status) => this.showPipelineProgress(jobId, status),
@@ -945,7 +997,8 @@ export default class AiTranscribeSummaryPlugin extends Plugin {
 			});
 			succeeded = true;
 		} catch (error) {
-			this.reportPipelineError("transcribe & summarize", error, source.baseName, () => void this.runPipeline(source, undefined, summaryPrompt), taskId);
+			const action = pipelineSettings.generateSummary ? "transcribe & summarize" : "transcribe";
+			this.reportPipelineError(action, error, source.baseName, () => void this.runPipeline(source, undefined, summaryPrompt, pipelineSettings), taskId);
 		} finally {
 			this.endPipelineJob(jobId, succeeded);
 		}
